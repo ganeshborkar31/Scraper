@@ -43,6 +43,31 @@ async def lifespan(_: FastAPI):
                 )
             )
             db.commit()
+        if not db.query(models.Source).filter_by(code="openstreetmap-overpass").first():
+            db.add(
+                models.Source(
+                    code="openstreetmap-overpass",
+                    name="OpenStreetMap via Overpass API",
+                    source_type="open_data",
+                    connector="openstreetmap",
+                    config={
+                        "endpoint": settings.osm_overpass_url,
+                        "user_agent": settings.osm_user_agent,
+                        "max_results": 100,
+                    },
+                    enabled=True,
+                    review_status="approved",
+                    countries=[],
+                    docs_url="https://dev.overpass-api.de/overpass-doc/en/",
+                    terms_url="https://www.openstreetmap.org/copyright",
+                    license_info=(
+                        "Open Database License (ODbL); provide OpenStreetMap attribution "
+                        "and comply with share-alike obligations for publicly used derived databases."
+                    ),
+                    attribution="© OpenStreetMap contributors, ODbL 1.0",
+                )
+            )
+            db.commit()
     yield
 
 
@@ -147,6 +172,7 @@ async def create_job(
         city=payload.city,
         category=payload.category,
         source_ids=payload.source_ids or [],
+        bounds=payload.bounds.model_dump() if payload.bounds else None,
         max_results=payload.max_results,
     )
     db.add(job)
@@ -173,6 +199,7 @@ def list_jobs(
             "id": j.id,
             "query": j.query,
             "country": j.country,
+            "bounds": j.bounds,
             "status": j.status,
             "created_at": j.created_at,
         }
@@ -192,6 +219,7 @@ def get_job(job_id: str, _: str = Depends(admin), db: Session = Depends(session)
         "id": job.id,
         "query": job.query,
         "country": job.country,
+        "bounds": job.bounds,
         "status": job.status,
         "created_at": job.created_at,
         "started_at": job.started_at,

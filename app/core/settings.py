@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "change-this-for-local-development"
     public_contact_email: str = ""
+    osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
+    osm_user_agent: str = "BusinessDataDiscovery/0.1 (OpenStreetMap collection)"
 
 
 settings = Settings()

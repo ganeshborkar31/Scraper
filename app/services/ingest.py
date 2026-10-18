@@ -25,6 +25,7 @@ def ingest_job(job_id: str) -> None:
         category=job.category,
         source_ids=job.source_ids,
         max_results=job.max_results,
+        bounds=job.bounds,
     )
     sources = (
         db.query(Source).filter(Source.enabled.is_(True), Source.review_status == "approved").all()

@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def normalize_name(value: str) -> str:
@@ -43,6 +43,22 @@ class Candidate(BaseModel):
         return value
 
 
+class GeographicBounds(BaseModel):
+    south: float = Field(ge=-90, le=90)
+    west: float = Field(ge=-180, le=180)
+    north: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def bounded_area(self):
+        height, width = self.north - self.south, self.east - self.west
+        if height <= 0 or width <= 0:
+            raise ValueError("bounds must have south < north and west < east")
+        if height > 0.100000001 or width > 0.100000001:
+            raise ValueError("collection bounds must fit within a 0.1 by 0.1 degree area")
+        return self
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     country: str = Field(min_length=2, max_length=2)
@@ -50,6 +66,7 @@ class SearchRequest(BaseModel):
     category: str | None = None
     source_ids: list[str] | None = None
     max_results: int = Field(default=100, ge=1, le=1000)
+    bounds: GeographicBounds | None = None
 
     @field_validator("country")
     @classmethod

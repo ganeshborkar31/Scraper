@@ -24,7 +24,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://business_app:business_app@postgres:5432/business_db
-    command: celery -A app.tasks.celery_app:celery worker --loglevel=INFO
+    command: celery -A app.tasks.celery_app:celery worker --concurrency=1 --loglevel=INFO
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

@@ -24,3 +24,4 @@ def test_migrations_upgrade_clean_sqlite_database(tmp_path):
     assert {"source_identifier", "source_name", "first_seen", "last_seen", "collection_status"}.issubset(
         {column["name"] for column in inspector.get_columns("source_records")}
     )
+    assert "bounds" in {column["name"] for column in inspector.get_columns("jobs")}

@@ -104,6 +104,7 @@ class Job(Base):
     city: Mapped[str | None] = mapped_column(String(200))
     category: Mapped[str | None] = mapped_column(String(200))
     source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    bounds: Mapped[dict | None] = mapped_column(JSON)
     max_results: Mapped[int] = mapped_column(Integer, default=100)
     status: Mapped[str] = mapped_column(String(32), default="queued")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

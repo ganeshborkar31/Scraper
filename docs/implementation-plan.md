@@ -6,9 +6,11 @@
 - [x] Background work: queued jobs, source-level partial failure handling, Celery schedule polling.
 - [x] API/UI: protected dashboard, search jobs, source listing, business list/detail, provenance, CSV export, schedule endpoints.
 - [x] Initial versioned Alembic migration; full admin source CRUD remains outstanding.
-- [ ] Verified live connector, robust domain rate limiting and crawler policy enforcement.
+- [x] Extensible connector lifecycle with fixture connector and classified source/record errors.
+- [x] Phase 4 OpenStreetMap Overpass integration: bounded live-query connector, provenance, saved fixtures, and documented API collection. Live service availability is not exercised by ordinary tests.
+- [ ] Broader live connectors, robust distributed rate limiting, and crawler policy enforcement.
 - [ ] Schedule overlap lock, cancellation, per-source outcome UI and complete integration tests.
 
 ## Current execution
 
-The first vertical slice uses HTTP Basic protection and local file imports. Live collection remains disabled. SQLite supports a no-Docker development path; Compose config targets PostgreSQL and Redis. Connector tests cover dataset and fixture parsing, pagination, malformed records, classified failure isolation, provenance, normalization, and deduplication; the full requested API/worker/schedule integration matrix remains outstanding.
+The current slice uses HTTP Basic protection, local file imports, and a bounded OpenStreetMap Overpass connector. Automated tests use saved Overpass responses; no live request or complete deployed worker flow is verified by the test suite. SQLite supports a no-Docker development path; Compose config targets PostgreSQL and Redis. The full API/worker/schedule integration matrix remains outstanding.

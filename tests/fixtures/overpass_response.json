@@ -1,0 +1,39 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API",
+  "elements": [
+    {
+      "type": "node",
+      "id": 123456,
+      "lat": 37.123,
+      "lon": -122.123,
+      "tags": {
+        "name": "Fixture Bakery",
+        "shop": "bakery",
+        "addr:housenumber": "10",
+        "addr:street": "Market Street",
+        "addr:city": "Sampletown",
+        "addr:postcode": "94000",
+        "website": "https://bakery.example",
+        "phone": "+1-555-0100"
+      }
+    },
+    {
+      "type": "way",
+      "id": 987654,
+      "center": {"lat": 37.124, "lon": -122.124},
+      "tags": {
+        "name": "Second Bakery",
+        "shop": "bakery",
+        "contact:website": "https://second.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 333333,
+      "lat": 37.125,
+      "lon": -122.125,
+      "tags": {"shop": "bakery"}
+    }
+  ]
+}
