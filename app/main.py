@@ -2,17 +2,22 @@ import csv
 import io
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from sqlalchemy import or_, update
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import Text, cast, func, or_, update
 from sqlalchemy.orm import Session
 
+from app.connectors.openstreetmap import CATEGORY_TAGS, MIN_REQUEST_INTERVAL_SECONDS
+from app.connectors.registry import CONNECTORS
 from app.core.settings import settings
 from app.db import models
 from app.db.session import Base, SessionLocal, engine
-from app.schemas import ScheduleRequest, SearchRequest
+from app.schemas import ScheduleRequest, SearchRequest, SourceUpdate
 from app.services.discovery import source_compatibility
 from app.services.job_state import InvalidJobTransition, transition_job
 from app.services.merges import MergeError, merge_businesses, reverse_business_merge
@@ -75,8 +80,10 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Business Data Discovery", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Business Data Platform", version="0.1.0", lifespan=lifespan)
 security = HTTPBasic()
+STATIC_DIRECTORY = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIRECTORY), name="static")
 
 
 def admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -112,27 +119,89 @@ def ready(db: Session = Depends(session)):
     return {"status": "ready"}
 
 
+@app.get("/dashboard/overview")
+def dashboard_overview(_: str = Depends(admin), db: Session = Depends(session)):
+    total_businesses = db.query(func.count(models.Business.id)).scalar() or 0
+    total_sources = db.query(func.count(models.Source.id)).scalar() or 0
+    enabled_sources = db.query(func.count(models.Source.id)).filter_by(enabled=True).scalar() or 0
+    approved_sources = (
+        db.query(func.count(models.Source.id)).filter_by(review_status="approved").scalar() or 0
+    )
+    job_counts = {
+        status: db.query(func.count(models.Job.id)).filter_by(status=status).scalar() or 0
+        for status in (
+            "queued",
+            "running",
+            "retrying",
+            "succeeded",
+            "partial_success",
+            "failed",
+            "cancel_requested",
+            "cancelled",
+        )
+    }
+    recent_jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).limit(8).all()
+    failures = (
+        db.query(models.Job)
+        .filter(models.Job.status.in_(["failed", "partial_success"]))
+        .order_by(models.Job.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    activity = (
+        db.query(models.SourceRecord, models.Business, models.Source)
+        .join(models.Business, models.Business.id == models.SourceRecord.business_id)
+        .join(models.Source, models.Source.id == models.SourceRecord.source_id)
+        .order_by(models.SourceRecord.collected_at.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "business_count": total_businesses,
+        "source_count": total_sources,
+        "enabled_source_count": enabled_sources,
+        "approved_source_count": approved_sources,
+        "job_counts": job_counts,
+        "recent_jobs": [_job_summary(job) for job in recent_jobs],
+        "recent_failures": [_job_summary(job) for job in failures],
+        "recent_activity": [
+            {
+                "business_id": business.id,
+                "business_name": business.name,
+                "source_id": source.id,
+                "source_name": source.name,
+                "source_url": record.source_url,
+                "collected_at": record.collected_at,
+            }
+            for record, business, source in activity
+        ],
+    }
+
+
+def _job_summary(job: models.Job) -> dict:
+    outcome = job.outcome or {}
+    return {
+        "id": job.id,
+        "query": job.query,
+        "country": job.country,
+        "status": job.status,
+        "trigger_type": job.trigger_type,
+        "source_ids": job.source_ids,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
+        "error": job.error,
+        "discovered": outcome.get("discovered", 0),
+        "accepted": outcome.get("accepted", 0),
+        "rejected": outcome.get("rejected", 0),
+        "inserted": outcome.get("inserted", outcome.get("created", 0)),
+        "updated": outcome.get("updated", 0),
+        "retry_count": job.retry_count,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(_: str = Depends(admin), db: Session = Depends(session)):
-    source_count = db.query(models.Source).count()
-    business_count = db.query(models.Business).count()
-    jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).limit(10).all()
-    body = "".join(
-        f"<li><a href='/jobs/{j.id}'>Job {j.id[:8]}</a> — {j.query} ({j.status})</li>" for j in jobs
-    )
-    return f"""<!doctype html><html><head><title>Business discovery</title><link rel='stylesheet' href='/static/style.css'></head><body>
-    <main><h1>Business data discovery</h1><p>Sources: {source_count} · Businesses: {business_count}</p>
-    <h2>Submit a collection</h2><form method='post' action='/ui/jobs'><label>Query <input name='query' required maxlength='500'></label>
-    <label>Country <input name='country' value='IN' required maxlength='2'></label><label>City <input name='city'></label><button>Queue job</button></form>
-    <h2>Recent jobs</h2><ul>{body}</ul><p><a href='/sources'>Inspect sources (API)</a> · <a href='/businesses'>Browse records (API)</a></p></main></body></html>"""
-
-
-@app.get("/static/style.css")
-def style():
-    return Response(
-        "body{font:16px system-ui;background:#f4f6f8;color:#17212b}main{max-width:850px;margin:3rem auto;background:white;padding:2rem;border-radius:12px}label{display:block;margin:1rem 0}input{padding:.55rem;margin-left:.5rem}button{padding:.65rem 1rem}",
-        media_type="text/css",
-    )
+def dashboard(_: str = Depends(admin)):
+    return FileResponse(STATIC_DIRECTORY / "index.html")
 
 
 @app.post("/ui/jobs")
@@ -159,11 +228,66 @@ def sources(_: str = Depends(admin), db: Session = Depends(session)):
             "review_status": s.review_status,
             "countries": s.countries,
             "license": s.license_info,
+            "attribution": s.attribution,
+            "docs_url": s.docs_url,
+            "terms_url": s.terms_url,
+            "supported_configuration": _supported_source_configuration(s),
             "last_run_at": s.last_run_at,
+            "last_success_at": s.last_success_at,
             "last_error": s.last_error,
         }
         for s in db.query(models.Source).all()
     ]
+
+
+def _supported_source_configuration(source: models.Source) -> dict:
+    config = source.config or {}
+    connector = source.connector
+    if connector == "openstreetmap":
+        endpoint = urlparse(str(config.get("endpoint", "")))
+        try:
+            result_limit = min(100, int(config.get("max_results", 100)))
+        except (TypeError, ValueError):
+            result_limit = 100
+        return {
+            "mode": "bounded Overpass API collection",
+            "endpoint_host": endpoint.hostname,
+            "max_results": result_limit,
+            "minimum_request_interval_seconds": MIN_REQUEST_INTERVAL_SECONDS,
+            "categories": sorted(CATEGORY_TAGS),
+            "requires_bounds": True,
+        }
+    if connector == "dataset":
+        return {
+            "mode": "administrator-managed local CSV/JSON file",
+            "supported_filters": ["keyword", "country", "region", "city", "category"],
+            "requires_bounds": False,
+        }
+    return {"mode": "connector-managed", "connector": connector}
+
+
+@app.patch("/sources/{source_id}")
+def update_source(
+    source_id: str,
+    payload: SourceUpdate,
+    _: str = Depends(admin),
+    db: Session = Depends(session),
+):
+    source = db.get(models.Source, source_id)
+    if not source:
+        raise HTTPException(404, "Source not found")
+    if payload.enabled and source.review_status != "approved":
+        raise HTTPException(409, "Source must be approved before enabling")
+    connector = CONNECTORS.get(source.connector)
+    if payload.enabled and connector is None:
+        raise HTTPException(409, "Source connector is unavailable")
+    if payload.enabled:
+        valid, reason = connector.validate(source.config)
+        if not valid:
+            raise HTTPException(422, f"Source configuration is invalid: {reason}")
+    source.enabled = payload.enabled
+    db.commit()
+    return {"id": source.id, "enabled": source.enabled, "review_status": source.review_status}
 
 
 @app.post("/jobs", status_code=202)
@@ -413,6 +537,10 @@ def job_results(
 def businesses(
     q: str | None = None,
     country: str | None = None,
+    region: str | None = None,
+    city: str | None = None,
+    category: str | None = None,
+    source_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     _: str = Depends(admin),
@@ -427,6 +555,18 @@ def businesses(
         )
     if country:
         query = query.filter(models.Business.country == country.upper())
+    if region:
+        query = query.filter(models.Business.region.ilike(region))
+    if city:
+        query = query.filter(models.Business.city.ilike(city))
+    if category:
+        escaped_category = category.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(
+            cast(models.Business.categories, Text).ilike(f'%"{escaped_category}"%', escape="\\")
+        )
+    if source_id:
+        query = query.join(models.SourceRecord).filter(models.SourceRecord.source_id == source_id)
+    query = query.distinct()
     total = query.count()
     rows = query.order_by(models.Business.name).offset(offset).limit(limit).all()
     return {
@@ -437,9 +577,16 @@ def businesses(
                 "name": b.name,
                 "domain": b.domain,
                 "country": b.country,
+                "region": b.region,
                 "city": b.city,
+                "address": b.address,
+                "website": b.website,
+                "phone": b.phone,
+                "latitude": b.latitude,
+                "longitude": b.longitude,
                 "categories": b.categories,
                 "synthetic": b.synthetic,
+                "last_seen": b.last_seen,
             }
             for b in rows
         ],
@@ -469,6 +616,10 @@ def business_detail(business_id: str, _: str = Depends(admin), db: Session = Dep
         "region": item.region,
         "address": item.address,
         "domain": item.domain,
+        "website": item.website,
+        "postal_code": item.postal_code,
+        "latitude": item.latitude,
+        "longitude": item.longitude,
         "categories": item.categories,
         "email": item.email,
         "phone": item.phone,

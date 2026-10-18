@@ -142,3 +142,7 @@ class ScheduleRequest(BaseModel):
         if self.source_ids and set(self.source_limits) - set(self.source_ids):
             raise ValueError("source_limits keys must be selected source IDs")
         return self
+
+
+class SourceUpdate(BaseModel):
+    enabled: bool

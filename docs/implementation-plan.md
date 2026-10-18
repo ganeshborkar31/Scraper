@@ -12,6 +12,7 @@
 - [x] Phase 6 on-demand discovery with source compatibility selection, trackable Celery jobs, and paginated new/existing results.
 - [x] Phase 7 scheduled collection with atomic dispatch claims, overlap controls, source limits, pause/resume, execution history, and transient retries.
 - [x] Phase 8 background reliability with explicit job transitions, atomic worker claims, bounded retries, idempotent source observations, per-source outcomes, cancellation, and stale job recovery.
+- [x] Phase 9 Web Dashboard with persisted overview metrics, filtered business exploration and provenance, reviewed source enable/disable, job inspection/cancellation, and schedule management using the existing FastAPI stack.
 - [ ] Broader live connectors, robust distributed rate limiting, and crawler policy enforcement.
 - [ ] Schedule editing/cancellation for existing child jobs, worker health and per-source outcome UI, and complete deployed integration tests.
 

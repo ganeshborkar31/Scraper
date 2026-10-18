@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Business Data Platform</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/dashboard.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Business Data Platform home">
+        <span class="brand-mark" aria-hidden="true">BD</span>
+        <span>Business Data Platform</span>
+      </a>
+      <p class="topbar-note">Collected data, sources, and jobs</p>
+    </header>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Dashboard sections">
+        <button class="nav-item active" data-view="overview" aria-current="page">Overview</button>
+        <button class="nav-item" data-view="businesses">Business Explorer</button>
+        <button class="nav-item" data-view="sources">Sources</button>
+        <button class="nav-item" data-view="jobs">Jobs</button>
+        <button class="nav-item" data-view="schedules">Automatic Collection</button>
+      </nav>
+      <main id="main-content" class="main-content" tabindex="-1">
+        <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+        <section id="view-overview" class="view" aria-labelledby="overview-title">
+          <div class="page-heading"><div><p class="eyebrow">Workspace</p><h1 id="overview-title">Overview</h1></div><button class="button secondary" data-refresh="overview">Refresh</button></div>
+          <div id="overview-cards" class="metric-grid" aria-live="polite"></div>
+          <div class="content-grid">
+            <article class="panel"><div class="panel-heading"><h2>Recent jobs</h2><button class="text-button" data-open-view="jobs">View all</button></div><div id="overview-jobs" class="data-region"></div></article>
+            <article class="panel"><div class="panel-heading"><h2>Recent failures</h2><button class="text-button" data-open-view="jobs">View all jobs</button></div><div id="overview-failures" class="data-region"></div></article>
+          </div>
+          <article class="panel"><div class="panel-heading"><h2>Collection activity</h2><button class="text-button" data-open-view="businesses">Explore businesses</button></div><div id="overview-activity" class="data-region"></div></article>
+        </section>
+
+        <section id="view-businesses" class="view" aria-labelledby="businesses-title" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Records</p><h1 id="businesses-title">Business Explorer</h1></div></div>
+          <form id="business-filter" class="filter-panel panel">
+            <label>Search<input name="q" type="search" maxlength="200" placeholder="Name or city"></label>
+            <label>Country<input name="country" maxlength="2" placeholder="US"></label>
+            <label>Region<input name="region" maxlength="200"></label>
+            <label>City<input name="city" maxlength="200"></label>
+            <label>Category<input name="category" maxlength="100"></label>
+            <label>Source<select name="source_id"><option value="">All sources</option></select></label>
+            <button class="button primary" type="submit">Search</button>
+          </form>
+          <article class="panel"><div class="panel-heading"><h2>Businesses</h2><span id="business-total" class="muted"></span></div><div id="business-results" class="data-region"></div><div class="pagination"><button class="button secondary" data-page="businesses" data-delta="-1">Previous</button><span id="business-page-label"></span><button class="button secondary" data-page="businesses" data-delta="1">Next</button></div></article>
+        </section>
+
+        <section id="view-sources" class="view" aria-labelledby="sources-title" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Access and attribution</p><h1 id="sources-title">Sources</h1><p class="muted">Only reviewed sources can be enabled. Configuration is displayed without secrets or local file paths.</p></div><button class="button secondary" data-refresh="sources">Refresh</button></div>
+          <div id="source-results" class="stack data-region"></div>
+        </section>
+
+        <section id="view-jobs" class="view" aria-labelledby="jobs-title" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Background processing</p><h1 id="jobs-title">Jobs</h1></div><button class="button secondary" data-refresh="jobs">Refresh</button></div>
+          <article class="panel"><div class="panel-heading"><h2>Recent collection jobs</h2></div><div id="job-results" class="data-region"></div><div class="pagination"><button class="button secondary" data-page="jobs" data-delta="-1">Previous</button><span id="job-page-label"></span><button class="button secondary" data-page="jobs" data-delta="1">Next</button></div></article>
+        </section>
+
+        <section id="view-schedules" class="view" aria-labelledby="schedules-title" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Recurring jobs</p><h1 id="schedules-title">Automatic Collection</h1><p class="muted">Schedules use reviewed source limits and run through the background worker.</p></div><button class="button secondary" data-refresh="schedules">Refresh</button></div>
+          <article class="panel"><div class="panel-heading"><h2>Create a schedule</h2></div>
+            <form id="schedule-form" class="form-grid">
+              <label>Keyword<input name="query" required maxlength="200"></label>
+              <label>Countries (comma separated)<input name="countries" required placeholder="US, CA" aria-describedby="countries-help"><small id="countries-help">Use ISO alpha-2 country codes.</small></label>
+              <label>Region<input name="region" maxlength="200"></label><label>City<input name="city" maxlength="200"></label>
+              <label>Category<input name="category" maxlength="200"></label>
+              <label>Frequency (minutes)<input name="interval_minutes" type="number" min="5" max="525600" value="1440" required></label>
+              <label>Maximum records per country job<input name="max_results" type="number" min="1" max="1000" value="100" required></label>
+              <label>Retry attempts<input name="retry_attempts" type="number" min="0" max="5" value="3" required></label>
+              <fieldset class="source-picker"><legend>Eligible sources and optional per-source caps</legend><div id="schedule-source-options" class="source-options"></div></fieldset>
+              <fieldset class="bounds-picker"><legend>Optional collection bounds (each dimension up to 0.1°)</legend>
+                <label>South<input name="south" type="number" step="any" min="-90" max="90"></label><label>West<input name="west" type="number" step="any" min="-180" max="180"></label><label>North<input name="north" type="number" step="any" min="-90" max="90"></label><label>East<input name="east" type="number" step="any" min="-180" max="180"></label>
+              </fieldset>
+              <label class="check-label"><input name="enabled" type="checkbox" checked> Enable after creation</label>
+              <label class="check-label"><input name="allow_overlap" type="checkbox"> Allow overlapping runs</label>
+              <div class="form-actions"><button class="button primary" type="submit">Create schedule</button></div>
+            </form>
+          </article>
+          <article class="panel"><div class="panel-heading"><h2>Configured schedules</h2></div><div id="schedule-results" class="stack data-region"></div></article>
+        </section>
+      </main>
+    </div>
+    <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title">Details</h2><button class="icon-button" data-close-dialog aria-label="Close details">×</button></div><div id="detail-content"></div></dialog>
+  </body>
+</html>
