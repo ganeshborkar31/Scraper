@@ -6,6 +6,9 @@ This file records repository state after inspection and checks. “Verified” m
 
 ## Completed and verified
 
+- [x] Phase 5 normalization/deduplication implemented: normalized business keys, preserved raw source fields, quality-ranked canonical updates, exact/likely/uncertain/distinct decisions, conservative matching, and audited reversible merges.
+- [x] Phase 5 verification: `pytest -q` passes (31 tests), Ruff passes for `app`, `tests`, and `alembic`, and Alembic upgrades both a clean database and an existing Phase 4 SQLite schema through `0004_matching_audit`.
+
 - [x] Phase 4 OpenStreetMap Overpass connector implemented with bounded bbox/category queries, OSM attribution/provenance, validation, saved-response tests, and API documentation.
 - [x] Phase 4 verification: `pytest -q` passes (21 tests), Ruff passes for `app`, `tests`, and `alembic`, and Alembic upgrades a clean SQLite database through `0003_job_bounds`.
 
@@ -25,9 +28,9 @@ This file records repository state after inspection and checks. “Verified” m
 
 ## Current components
 
-- **Architecture:** FastAPI request layer, SQLAlchemy persistence, Celery worker and Beat scheduler, Redis queue, PostgreSQL Compose service, SQLite developer fallback. Connectors implement a shared `validate`/`health_check`/`collect` contract, with `BaseConnector` lifecycle hooks for discovery, fetch, parse, normalization, pagination, rate spacing, and validation errors. Dataset is the only production registered connector; the in-memory fixture connector is for offline tests.
+- **Architecture:** FastAPI request layer, SQLAlchemy persistence, Celery worker and Beat scheduler, Redis queue, PostgreSQL Compose service, SQLite developer fallback. Dataset and bounded OpenStreetMap Overpass connectors are registered; the in-memory fixture connector is for offline tests. Matching decisions and reversible merge events are persisted.
 - **Backend and UI:** API and a minimal HTML dashboard are present. There is no separate frontend. Dashboard job content is interpolated into HTML without escaping; see known issues.
-- **Database:** Source, business, provenance, job, and schedule models exist. Phase 2 adds business website/verification/audit timestamps, coordinate checks, source identity snapshots, observation timestamps/status, and indexes. Repeat external IDs are represented as separate source observations. Migration `0002_business_provenance` upgrades prior schemas; `0001_initial` still builds from live metadata and should be made a stable historical migration.
+- **Database:** Source, business, provenance, match decision, merge audit, job, and schedule models exist. Migrations `0002` through `0004` expand prior schemas; `0001_initial` still builds from live metadata and should be made a stable historical migration. Repeat observations and raw candidate field values remain source-attributed.
 - **API:** Health/readiness, job submission/status, sources listing, business search/detail/export, and basic schedule CRUD routes exist. API tests do not exercise routes through an HTTP client.
 - **Connectors:** The common lifecycle supports independent discovery/fetch/parse/normalization and pagination strategies; configured request spacing and classified errors are available. Local CSV/JSON and fixture connectors plus a bounded OpenStreetMap Overpass connector are implemented. Saved-response tests do not make live requests. There are no other provider connectors, allowlisted crawler, file upload, fetch/enrich operation, or advanced distributed quota manager.
 - **Background work:** Celery job execution and periodic schedule dispatch code exists. No tests cover worker transitions, partial failures, retry behavior, schedule dispatch, overlap prevention, or idempotency across whole jobs.
@@ -42,7 +45,7 @@ This file records repository state after inspection and checks. “Verified” m
 - [ ] **Migration safety:** Replace metadata-driven initial migration with explicit schema operations and add incremental revisions. Decide whether runtime `create_all` remains only a development helper.
 - [ ] **API coverage:** Add HTTP-level tests for auth, validation, pagination, CSV formula escaping, job queue failure, and protected source/schedule actions. Current tests call helper functions directly and do not establish route protection comprehensively.
 - [ ] **Source correctness:** Filter approved/enabled sources by country and record type; validate requested source IDs against compatible sources. Add admin source review/enable/disable endpoints with auditability.
-- [ ] **Data ingestion:** Add job-level transaction/error tests, source-level partial failure coverage, proper field updates on repeat observations, and protections for unbounded dataset files/row counts. Current external-ID repeat handling updates `last_seen` but does not refresh business fields or provenance timestamps.
+- [ ] **Data ingestion:** Add broader worker transaction/error coverage and protections for unbounded dataset files/row counts. Field updates now use configured quality ranks, and every observation has a persisted match decision.
 - [ ] **Schedules:** Add atomic/transactional overlap protection keyed to schedule ID, robust schedule updates, location/category/source compatibility, and dispatch/retry tests. Existing duplicate check is a read-before-write query and can race between dispatchers.
 - [ ] **Operations:** Add structured redacted logs, per-source timeout/rate-limit controls, worker health/readiness, cancellation behavior, metrics, and retention/deletion hooks.
 - [ ] **Product requirements:** Add city/category/source filters, usable business and job detail pages, schedules page, and visible attribution. Source detail/health and latest-error overview are limited.

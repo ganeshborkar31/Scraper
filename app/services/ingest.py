@@ -1,8 +1,19 @@
+import hashlib
+import json
+
 from app.connectors.base import ConnectorError, ConnectorErrorKind
 from app.connectors.registry import CONNECTORS
-from app.db.models import Business, Source, SourceRecord, now
+from app.db.models import Business, MatchDecision, Source, SourceRecord, now
 from app.db.session import SessionLocal
-from app.schemas import Candidate, SearchRequest, normalize_domain, normalize_name
+from app.schemas import Candidate, SearchRequest
+from app.services.matching import MatchClass, MatchingRules, best_match
+from app.services.normalization import (
+    normalize_address,
+    normalize_coordinates,
+    normalize_domain,
+    normalize_name,
+    normalize_phone,
+)
 
 
 def ingest_job(job_id: str) -> None:
@@ -101,84 +112,168 @@ def ingest_job(job_id: str) -> None:
 
 
 def upsert(db, source: Source, item: Candidate) -> str:
+    raw_values = item.raw_values or item.model_dump(mode="json", exclude={"raw_values"})
+    payload_hash = hashlib.sha256(
+        json.dumps(raw_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    match = None
+    classification = MatchClass.DISTINCT
+    rule = "no_candidate"
+    score = 0.0
     if item.external_id:
         existing_record = (
             db.query(SourceRecord)
             .filter_by(source_id=source.id, external_id=item.external_id)
+            .order_by(SourceRecord.collected_at.asc())
             .first()
         )
         if existing_record:
             business = existing_record.business
-            business.last_seen = now()
-            business.updated_at = now()
+            classification, rule, score = MatchClass.EXACT, "source_external_id", 1.0
             outcome = "duplicate"
         else:
-            outcome = None
+            business = None
     else:
-        outcome = None
-    domain = normalize_domain(item.website)
-    if outcome is None:
-        business = (
-            db.query(Business)
-            .filter(Business.domain == domain, Business.country == item.country)
-            .first()
-            if domain
-            else None
-        )
-    if outcome is None and not business:
-        business = (
-            db.query(Business)
-            .filter_by(
-                country=item.country, normalized_name=normalize_name(item.name), city=item.city
-            )
+        existing_record = (
+            db.query(SourceRecord)
+            .filter_by(source_id=source.id, payload_hash=payload_hash)
+            .order_by(SourceRecord.collected_at.asc())
             .first()
         )
-    if outcome == "duplicate":
-        if item.website:
-            business.website = item.website
-        if item.source_url:
-            business.updated_at = now()
-    elif business:
-        business.last_seen = now()
-        business.updated_at = now()
-        if not business.domain and domain:
-            business.domain = domain
-        if item.website and not business.website:
-            business.website = item.website
-        outcome = "updated"
-    else:
-        business = Business(
-            name=item.name,
-            normalized_name=normalize_name(item.name),
-            domain=domain,
-            website=item.website,
-            country=item.country,
-            city=item.city,
-            region=item.region,
-            address=item.address,
-            postal_code=item.postal_code,
-            latitude=item.latitude,
-            longitude=item.longitude,
-            categories=item.categories,
-            email=item.email,
-            phone=item.phone,
-            description=item.description,
-            synthetic=item.synthetic,
+        if existing_record:
+            business = existing_record.business
+            classification, rule, score = MatchClass.EXACT, "source_payload_fingerprint", 1.0
+            outcome = "duplicate"
+        else:
+            business = None
+    if business is None:
+        candidates = (
+            db.query(Business)
+            .filter(Business.country == item.country)
+            .order_by(Business.id)
+            .all()
         )
-        db.add(business)
-        db.flush()
-        outcome = "created"
+        rules = MatchingRules.from_config(source.config.get("matching_rules"))
+        match = best_match(candidates, item, rules)
+        classification, rule, score = match.classification, match.rule, match.score
+        if classification == MatchClass.EXACT and match.candidate:
+            business = match.candidate
+            outcome = "updated"
+            _update_business(business, item, source)
+        else:
+            business = _new_business(item, source)
+            db.add(business)
+            db.flush()
+            outcome = "created"
+    else:
+        _update_business(business, item, source)
+    business.last_seen = now()
+    business.updated_at = now()
+    record = SourceRecord(
+        source_id=source.id,
+        source_identifier=source.code,
+        source_name=source.name,
+        business_id=business.id,
+        external_id=item.external_id,
+        source_url=item.source_url,
+        collection_status="collected",
+        metadata_json={"attribution": source.attribution or ""},
+        raw_values_json=raw_values,
+        payload_hash=payload_hash,
+    )
+    db.add(record)
+    db.flush()
     db.add(
-        SourceRecord(
-            source_id=source.id,
-            source_identifier=source.code,
-            source_name=source.name,
+        MatchDecision(
+            source_record_id=record.id,
             business_id=business.id,
-            external_id=item.external_id,
-            source_url=item.source_url,
-            collection_status="collected",
-            metadata_json={"attribution": source.attribution or ""},
+            candidate_business_id=(
+                match.candidate.id if match and match.candidate
+                else business.id if classification == MatchClass.EXACT
+                else None
+            ),
+            classification=classification.value,
+            rule=rule,
+            score=score,
+            auto_merged=classification == MatchClass.EXACT and outcome != "created",
         )
     )
     db.flush()
     return outcome
+
+
+def _field_quality(source: Source, item: Candidate) -> dict[str, int]:
+    configured = source.config.get("field_quality", {})
+    quality = {}
+    for field in (
+        "name", "website", "city", "region", "address", "postal_code", "latitude",
+        "longitude", "categories", "email", "phone", "description",
+    ):
+        value = getattr(item, field)
+        if value is None or value == "" or value == []:
+            continue
+        try:
+            score = int(configured.get(field, 50))
+        except (TypeError, ValueError):
+            score = 50
+        quality[field] = min(100, max(0, score))
+    return quality
+
+
+def _new_business(item: Candidate, source: Source) -> Business:
+    latitude, longitude = normalize_coordinates(item.latitude, item.longitude)
+    return Business(
+        name=item.name.strip(),
+        normalized_name=normalize_name(item.name),
+        domain=normalize_domain(item.website),
+        normalized_address=normalize_address(item.address),
+        normalized_phone=normalize_phone(item.phone),
+        field_quality_json=_field_quality(source, item),
+        website=item.website.strip() if item.website else None,
+        country=item.country.upper(),
+        city=item.city.strip() if item.city else None,
+        region=item.region.strip() if item.region else None,
+        address=item.address.strip() if item.address else None,
+        postal_code=item.postal_code.strip() if item.postal_code else None,
+        latitude=latitude,
+        longitude=longitude,
+        categories=item.categories,
+        email=item.email.strip().lower() if item.email else None,
+        phone=item.phone.strip() if item.phone else None,
+        description=item.description.strip() if item.description else None,
+        synthetic=item.synthetic,
+    )
+
+
+def _update_business(business: Business, item: Candidate, source: Source) -> None:
+    latitude, longitude = normalize_coordinates(item.latitude, item.longitude)
+    incoming = {
+        "name": item.name.strip(),
+        "website": item.website.strip() if item.website else None,
+        "address": item.address.strip() if item.address else None,
+        "city": item.city.strip() if item.city else None,
+        "region": item.region.strip() if item.region else None,
+        "postal_code": item.postal_code.strip() if item.postal_code else None,
+        "latitude": latitude,
+        "longitude": longitude,
+        "categories": item.categories or None,
+        "email": item.email.strip().lower() if item.email else None,
+        "phone": item.phone.strip() if item.phone else None,
+        "description": item.description.strip() if item.description else None,
+    }
+    incoming_quality = _field_quality(source, item)
+    quality = dict(business.field_quality_json or {})
+    for field, value in incoming.items():
+        if value is None or value == "":
+            continue
+        existing = getattr(business, field)
+        new_score = incoming_quality.get(field, 50)
+        old_score = quality.get(field, 50 if existing else -1)
+        if not existing or new_score > old_score:
+            setattr(business, field, value)
+            quality[field] = new_score
+    business.normalized_name = normalize_name(business.name)
+    business.domain = normalize_domain(business.website)
+    business.normalized_address = normalize_address(business.address)
+    business.normalized_phone = normalize_phone(business.phone)
+    business.field_quality_json = quality

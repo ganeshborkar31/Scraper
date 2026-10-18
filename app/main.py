@@ -13,6 +13,7 @@ from app.core.settings import settings
 from app.db import models
 from app.db.session import Base, SessionLocal, engine
 from app.schemas import SearchRequest
+from app.services.merges import MergeError, merge_businesses, reverse_business_merge
 from app.tasks.celery_app import run_job
 
 
@@ -272,8 +273,12 @@ def business_detail(business_id: str, _: str = Depends(admin), db: Session = Dep
     if not item:
         raise HTTPException(404, "Business not found")
     sources = (
-        db.query(models.SourceRecord, models.Source)
+        db.query(models.SourceRecord, models.Source, models.MatchDecision)
         .join(models.Source, models.Source.id == models.SourceRecord.source_id)
+        .outerjoin(
+            models.MatchDecision,
+            models.MatchDecision.source_record_id == models.SourceRecord.id,
+        )
         .filter(models.SourceRecord.business_id == business_id)
         .all()
     )
@@ -297,10 +302,45 @@ def business_detail(business_id: str, _: str = Depends(admin), db: Session = Dep
                 "source_url": r.source_url,
                 "collected_at": r.collected_at,
                 "attribution": s.attribution,
+                "raw_values": r.raw_values_json,
+                "match_classification": decision.classification if decision else None,
+                "match_rule": decision.rule if decision else None,
             }
-            for r, s in sources
+            for r, s, decision in sources
         ],
     }
+
+
+@app.post("/businesses/{source_business_id}/merge/{target_business_id}")
+def merge_business_endpoint(
+    source_business_id: str,
+    target_business_id: str,
+    actor: str = Depends(admin),
+    db: Session = Depends(session),
+):
+    try:
+        event = merge_businesses(db, source_business_id, target_business_id, actor)
+        db.commit()
+    except MergeError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    return {"merge_id": event.id, "source_business_id": source_business_id,
+            "target_business_id": target_business_id}
+
+
+@app.post("/merges/{merge_id}/reverse")
+def reverse_business_merge_endpoint(
+    merge_id: str,
+    actor: str = Depends(admin),
+    db: Session = Depends(session),
+):
+    try:
+        business = reverse_business_merge(db, merge_id, actor)
+        db.commit()
+    except MergeError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    return {"merge_id": merge_id, "restored_business_id": business.id}
 
 
 @app.get("/businesses.csv")

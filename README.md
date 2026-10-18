@@ -4,7 +4,7 @@ A policy-aware MVP for collecting business-level records from reviewed sources. 
 
 ## Status
 
-Working: FastAPI dashboard/API, HTTP Basic protected admin routes, SQLAlchemy persistence, async Celery job queue, persisted schedules dispatched by Celery Beat, normalized business/source provenance records, explainable domain/name deduplication, bounded local CSV/JSON import, bounded OpenStreetMap Overpass collection, search/pagination, CSV export with formula-injection mitigation, and synthetic fixture.
+Working: FastAPI dashboard/API, HTTP Basic protected admin routes, SQLAlchemy persistence, async Celery job queue, persisted schedules dispatched by Celery Beat, normalized business/source provenance records, conservative explainable matching with reversible reviewed merges, bounded local CSV/JSON import, bounded OpenStreetMap Overpass collection, search/pagination, CSV export with formula-injection mitigation, and synthetic fixture.
 
 The extensible connector lifecycle is implemented, including network-free test fixtures, the local dataset connector, and a bounded OpenStreetMap Overpass connector. No other live external connector is enabled. The synthetic dataset contains demonstration records only. See [docs/openstreetmap.md](docs/openstreetmap.md) for collection limits and field caveats. Official registry, commercial search, and allowlisted crawling connectors remain absent. See [docs/adding-a-source.md](docs/adding-a-source.md) to implement another connector.
 
@@ -16,7 +16,7 @@ Without Docker: install `uv sync --extra dev` (or `pip install -e '.[dev]'`), se
 
 ## API
 
-Admin endpoints use HTTP Basic authentication: `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `GET /sources`, `GET /businesses`, `GET /businesses/{id}`, `GET /businesses.csv`, and schedule CRUD endpoints under `/schedules`. `GET /health` and `/ready` are public. Search requests accept query, ISO alpha-2 country, optional city/category/source IDs, and max_results (1–1000). Job submission returns promptly; work runs in Celery.
+Admin endpoints use HTTP Basic authentication: `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `GET /sources`, `GET /businesses`, `GET /businesses/{id}`, `GET /businesses.csv`, `POST /businesses/{source_id}/merge/{target_id}`, `POST /merges/{merge_id}/reverse`, and schedule CRUD endpoints under `/schedules`. `GET /health` and `/ready` are public. See [docs/normalization-deduplication.md](docs/normalization-deduplication.md) for matching decisions, field quality, and merge reversal.
 
 The included synthetic dataset and OpenStreetMap source are loaded at startup. For a small OSM test collection, get the source ID from `GET /sources`, then submit an authenticated `POST /jobs` with its ID, a supported `category`, `country`, `max_results` (at most 100), and `bounds` (`south`, `west`, `north`, `east`; each dimension at most 0.1 degrees). See [docs/openstreetmap.md](docs/openstreetmap.md) for a complete request and source limitations. The included OSM connector uses Overpass API, not Nominatim or the tile service. To add an administrator-controlled local file, configure a source in the database with connector `dataset` and an absolute/controlled local path. Do not point it to a user supplied URL.
 

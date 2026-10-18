@@ -93,7 +93,15 @@ class BaseConnector:
 
     def normalize(self, record: dict[str, Any], config: dict[str, Any]) -> Candidate:
         try:
-            return Candidate.model_validate(record)
+            normalized = dict(record)
+            candidate_fields = {
+                "name", "country", "website", "city", "region", "address", "postal_code",
+                "latitude", "longitude", "categories", "email", "phone", "description",
+                "external_id", "source_url", "synthetic",
+            }
+            source_values = {key: value for key, value in record.items() if key in candidate_fields}
+            normalized.setdefault("raw_values", source_values)
+            return Candidate.model_validate(normalized)
         except ValidationError as exc:
             raise ConnectorError(
                 ConnectorErrorKind.MALFORMED_RECORD,

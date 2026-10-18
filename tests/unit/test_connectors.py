@@ -3,7 +3,7 @@ from app.schemas import SearchRequest, normalize_domain, normalize_name
 
 
 def test_normalization_handles_punctuation_and_www():
-    assert normalize_name("  Café & Co.! ") == "caf co"
+    assert normalize_name("  Café & Co.! ") == "cafe co"
     assert normalize_domain("https://WWW.Example.com/path") == "example.com"
 
 

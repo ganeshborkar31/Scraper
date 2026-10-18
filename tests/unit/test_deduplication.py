@@ -97,7 +97,12 @@ def test_domain_matches_across_sources_and_similar_names_stay_distinct():
     second_source = source(db, "source-b")
     assert (
         upsert(
-            db, first_source, Candidate(name="North Star", country="GB", website="north.example")
+            db,
+            first_source,
+            Candidate(
+                name="North Star", country="GB", website="north.example",
+                address="10 High Street", city="London",
+            ),
         )
         == "created"
     )
@@ -106,7 +111,10 @@ def test_domain_matches_across_sources_and_similar_names_stay_distinct():
         upsert(
             db,
             second_source,
-            Candidate(name="North Star Ltd", country="GB", website="www.north.example"),
+            Candidate(
+                name="North Star", country="GB", website="https://www.north.example/path",
+                address="10 High Street", city="London",
+            ),
         )
         == "updated"
     )

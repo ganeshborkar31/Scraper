@@ -155,6 +155,11 @@ class OpenStreetMapConnector(BaseConnector):
             (f"{key}:{tags[key]}" for key in ("shop", "amenity", "craft", "office") if tags.get(key)),
             request.category or "business",
         )
+        retained_tag_keys = {
+            "name", "shop", "amenity", "craft", "office", "addr:full", "addr:housenumber",
+            "addr:street", "addr:city", "addr:state", "addr:postcode", "website",
+            "contact:website", "phone", "contact:phone",
+        }
         return {
             "name": tags.get("name", ""),
             "country": request.country,
@@ -171,6 +176,13 @@ class OpenStreetMapConnector(BaseConnector):
             "source_url": f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
             if osm_type and osm_id is not None
             else None,
+            "raw_values": {
+                "type": osm_type,
+                "id": osm_id,
+                "tags": {key: value for key, value in tags.items() if key in retained_tag_keys},
+                "lat": location.get("lat"),
+                "lon": location.get("lon"),
+            },
         }
 
     def collect(self, request: SearchRequest, config: dict[str, Any]):

@@ -1,18 +1,26 @@
 import re
+import unicodedata
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def normalize_name(value: str) -> str:
-    return " ".join(re.sub(r"[^a-z0-9 ]", " ", value.lower()).split())
+    decomposed = unicodedata.normalize("NFKD", value).casefold()
+    plain = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join("".join(char if char.isalnum() else " " for char in plain).split())
 
 
 def normalize_domain(value: str | None) -> str | None:
     if not value:
         return None
     parsed = urlparse(value if "://" in value else f"https://{value}")
-    host = (parsed.hostname or "").lower().removeprefix("www.").rstrip(".")
+    try:
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+    host = host.removeprefix("www.").rstrip(".")
     return host if "." in host and " " not in host else None
 
 
@@ -33,6 +41,7 @@ class Candidate(BaseModel):
     external_id: str | None = None
     source_url: str | None = None
     synthetic: bool = False
+    raw_values: dict[str, Any] | None = None
 
     @field_validator("country")
     @classmethod
