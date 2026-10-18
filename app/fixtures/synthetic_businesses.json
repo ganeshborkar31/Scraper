@@ -1,0 +1,5 @@
+[
+  {"name":"Example Bakery","country":"IN","city":"Bengaluru","website":"https://bakery.example","categories":["bakery"],"external_id":"synthetic-001","synthetic":true},
+  {"name":"Example Bicycle Repair","country":"US","city":"Austin","website":"https://bikes.example","categories":["repair"],"external_id":"synthetic-002","synthetic":true},
+  {"name":"Sample Garden Centre","country":"GB","city":"London","website":"https://garden.example","categories":["retail"],"external_id":"synthetic-003","synthetic":true}
+]

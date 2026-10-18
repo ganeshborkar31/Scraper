@@ -1,0 +1,54 @@
+services:
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://business_app:business_app@postgres:5432/business_db
+    command: alembic upgrade head
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://business_app:business_app@postgres:5432/business_db
+    ports: ["${APP_PORT:-8001}:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://business_app:business_app@postgres:5432/business_db
+    command: celery -A app.tasks.celery_app:celery worker --loglevel=INFO
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+  scheduler:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://business_app:business_app@postgres:5432/business_db
+    command: celery -A app.tasks.celery_app:celery beat --loglevel=INFO
+    depends_on:
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      api: {condition: service_started}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: business_db
+      POSTGRES_USER: business_app
+      POSTGRES_PASSWORD: business_app
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U business_app -d business_db"], interval: 5s, timeout: 3s, retries: 10}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10}
+volumes:
+  pgdata:

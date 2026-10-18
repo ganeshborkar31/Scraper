@@ -1,0 +1,98 @@
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.session import Base
+
+
+def now() -> datetime:
+    return datetime.now(UTC)
+
+
+class Source(Base):
+    __tablename__ = "sources"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    source_type: Mapped[str] = mapped_column(String(40))
+    connector: Mapped[str] = mapped_column(String(80))
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending_review")
+    countries: Mapped[list] = mapped_column(JSON, default=list)
+    record_types: Mapped[list] = mapped_column(JSON, default=lambda: ["business"])
+    docs_url: Mapped[str | None] = mapped_column(String(500))
+    terms_url: Mapped[str | None] = mapped_column(String(500))
+    license_info: Mapped[str | None] = mapped_column(Text)
+    attribution: Mapped[str | None] = mapped_column(Text)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class Business(Base):
+    __tablename__ = "businesses"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(300), index=True)
+    normalized_name: Mapped[str] = mapped_column(String(300), index=True)
+    domain: Mapped[str | None] = mapped_column(String(253), index=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    city: Mapped[str | None] = mapped_column(String(200))
+    region: Mapped[str | None] = mapped_column(String(200))
+    address: Mapped[str | None] = mapped_column(Text)
+    postal_code: Mapped[str | None] = mapped_column(String(32))
+    latitude: Mapped[float | None]
+    longitude: Mapped[float | None]
+    categories: Mapped[list] = mapped_column(JSON, default=list)
+    email: Mapped[str | None] = mapped_column(String(320))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text)
+    synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    source_records: Mapped[list["SourceRecord"]] = relationship(back_populates="business")
+
+
+class SourceRecord(Base):
+    __tablename__ = "source_records"
+    __table_args__ = (UniqueConstraint("source_id", "external_id", name="uq_source_external"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    external_id: Mapped[str | None] = mapped_column(String(300))
+    source_url: Mapped[str | None] = mapped_column(String(1000))
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    payload_hash: Mapped[str | None] = mapped_column(String(64))
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    business: Mapped[Business] = relationship(back_populates="source_records")
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    query: Mapped[str] = mapped_column(String(500))
+    country: Mapped[str] = mapped_column(String(2))
+    city: Mapped[str | None] = mapped_column(String(200))
+    category: Mapped[str | None] = mapped_column(String(200))
+    source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    max_results: Mapped[int] = mapped_column(Integer, default=100)
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    query: Mapped[str] = mapped_column(String(500))
+    country: Mapped[str] = mapped_column(String(2))
+    source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    interval_minutes: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,0 +1,3 @@
+# Adding a source
+
+Implement the `Connector` protocol in `app/connectors`, validate configuration without logging secrets, parse provider responses into `Candidate`, and return provenance IDs/URLs in candidates. Keep HTTP bounded with timeouts, source-approved concurrency/rate, and per-source error reporting. Avoid raw response retention unless the terms permit it. Register the connector by stable name and add a reviewed `Source` row with docs, terms, license, attribution, countries, and disabled/pending status. Add offline fixture-based parsing and failure tests. A source must be explicitly reviewed and enabled before production jobs can use it. Credentials come from environment or a secret manager.
