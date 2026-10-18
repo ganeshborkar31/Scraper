@@ -6,6 +6,9 @@ This file records repository state after inspection and checks. “Verified” m
 
 ## Completed and verified
 
+- [x] Phase 6 on-demand discovery implemented: validated keyword/location/category/source filters, connector capability selection with unavailable-source explanations, Celery job submission/status, paginated unique job results with new/existing disposition, and per-observation job provenance.
+- [x] Phase 6 verification: `pytest -q` passes (34 tests), Ruff passes for `app`, `tests`, and `alembic`, the migration test upgrades a clean SQLite database through `0005_on_demand_discovery`, and `git diff --check` passes. The background broker was not started; HTTP/Redis/Celery end-to-end dispatch remains unverified.
+
 - [x] Phase 5 normalization/deduplication implemented: normalized business keys, preserved raw source fields, quality-ranked canonical updates, exact/likely/uncertain/distinct decisions, conservative matching, and audited reversible merges.
 - [x] Phase 5 verification: `pytest -q` passes (31 tests), Ruff passes for `app`, `tests`, and `alembic`, and Alembic upgrades both a clean database and an existing Phase 4 SQLite schema through `0004_matching_audit`.
 
@@ -44,11 +47,11 @@ This file records repository state after inspection and checks. “Verified” m
 - [ ] **Production configuration:** Reject placeholder/example `APP_SECRET_KEY` values and require explicit non-example credentials. Move PostgreSQL credentials out of Compose literals or clearly constrain them to local development.
 - [ ] **Migration safety:** Replace metadata-driven initial migration with explicit schema operations and add incremental revisions. Decide whether runtime `create_all` remains only a development helper.
 - [ ] **API coverage:** Add HTTP-level tests for auth, validation, pagination, CSV formula escaping, job queue failure, and protected source/schedule actions. Current tests call helper functions directly and do not establish route protection comprehensively.
-- [ ] **Source correctness:** Filter approved/enabled sources by country and record type; validate requested source IDs against compatible sources. Add admin source review/enable/disable endpoints with auditability.
+- [ ] **Source administration:** Add admin source review/enable/disable endpoints with auditability. Discovery currently filters to enabled, approved business sources and validates explicit source IDs and connector capabilities.
 - [ ] **Data ingestion:** Add broader worker transaction/error coverage and protections for unbounded dataset files/row counts. Field updates now use configured quality ranks, and every observation has a persisted match decision.
 - [ ] **Schedules:** Add atomic/transactional overlap protection keyed to schedule ID, robust schedule updates, location/category/source compatibility, and dispatch/retry tests. Existing duplicate check is a read-before-write query and can race between dispatchers.
 - [ ] **Operations:** Add structured redacted logs, per-source timeout/rate-limit controls, worker health/readiness, cancellation behavior, metrics, and retention/deletion hooks.
-- [ ] **Product requirements:** Add city/category/source filters, usable business and job detail pages, schedules page, and visible attribution. Source detail/health and latest-error overview are limited.
+- [ ] **Product UI:** Add usable business and job detail pages, schedules page, and visible attribution. Search filters and source selection are available through the documented API; source detail/health and latest-error overview are limited.
 - [ ] **Integrations:** Official registry APIs, commercial search APIs, and website crawling are absent. Keep them explicitly unavailable until current technical and policy requirements are verified; do not present the synthetic fixture as live coverage.
 - [ ] **Local workflow:** Document/run host Redis configuration (`localhost` URLs) or provide a no-Docker Compose profile that starts Redis. Verify the complete documented workflow with a real Redis service.
 - [ ] **PostgreSQL/Compose:** Run a clean-volume migration and end-to-end job in Docker when daemon access is available. Confirm migration completion gates worker startup and that persisted schedule queries see the migrated schema.

@@ -6,6 +6,7 @@ from app.connectors.registry import CONNECTORS
 from app.db.models import Business, MatchDecision, Source, SourceRecord, now
 from app.db.session import SessionLocal
 from app.schemas import Candidate, SearchRequest
+from app.services.discovery import source_compatibility
 from app.services.matching import MatchClass, MatchingRules, best_match
 from app.services.normalization import (
     normalize_address,
@@ -32,6 +33,7 @@ def ingest_job(job_id: str) -> None:
     request = SearchRequest(
         query=job.query,
         country=job.country,
+        region=job.region,
         city=job.city,
         category=job.category,
         source_ids=job.source_ids,
@@ -48,6 +50,10 @@ def ingest_job(job_id: str) -> None:
         try:
             if connector is None:
                 raise ValueError("connector is unavailable")
+            compatible, reason = source_compatibility(source, request, connector=connector)
+            if not compatible:
+                per_source[source.code] = {"status": "skipped", "reason": reason}
+                continue
             valid, reason = connector.validate(source.config)
             if not valid:
                 raise ValueError(reason or "connector is not configured")
@@ -55,7 +61,7 @@ def ingest_job(job_id: str) -> None:
             source_created = source_updated = source_duplicates = 0
             for item in batch.records:
                 discovered += 1
-                result = upsert(db, source, item)
+                result = upsert(db, source, item, job_id=job.id)
                 source_created += result == "created"
                 source_updated += result == "updated"
                 source_duplicates += result == "duplicate"
@@ -73,8 +79,12 @@ def ingest_job(job_id: str) -> None:
                 "updated": source_updated,
                 "duplicates": source_duplicates,
                 "errors": [
-                    {"kind": issue.kind.value, "message": issue.message,
-                     "record_index": issue.record_index, "retry_after": issue.retry_after}
+                    {
+                        "kind": issue.kind.value,
+                        "message": issue.message,
+                        "record_index": issue.record_index,
+                        "retry_after": issue.retry_after,
+                    }
                     for issue in batch.issues
                 ],
             }
@@ -90,7 +100,11 @@ def ingest_job(job_id: str) -> None:
                 successes += 1
         except Exception as exc:
             db.rollback()
-            kind = exc.kind.value if isinstance(exc, ConnectorError) else ConnectorErrorKind.INVALID_RESPONSE.value
+            kind = (
+                exc.kind.value
+                if isinstance(exc, ConnectorError)
+                else ConnectorErrorKind.INVALID_RESPONSE.value
+            )
             source.last_run_at, source.last_error = now(), str(exc)[:500]
             per_source[source.code] = {"status": "failed", "error": str(exc)[:300], "kind": kind}
             failures += 1
@@ -111,7 +125,7 @@ def ingest_job(job_id: str) -> None:
     db.close()
 
 
-def upsert(db, source: Source, item: Candidate) -> str:
+def upsert(db, source: Source, item: Candidate, job_id: str | None = None) -> str:
     raw_values = item.raw_values or item.model_dump(mode="json", exclude={"raw_values"})
     payload_hash = hashlib.sha256(
         json.dumps(raw_values, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
@@ -148,10 +162,7 @@ def upsert(db, source: Source, item: Candidate) -> str:
             business = None
     if business is None:
         candidates = (
-            db.query(Business)
-            .filter(Business.country == item.country)
-            .order_by(Business.id)
-            .all()
+            db.query(Business).filter(Business.country == item.country).order_by(Business.id).all()
         )
         rules = MatchingRules.from_config(source.config.get("matching_rules"))
         match = best_match(candidates, item, rules)
@@ -174,6 +185,8 @@ def upsert(db, source: Source, item: Candidate) -> str:
         source_identifier=source.code,
         source_name=source.name,
         business_id=business.id,
+        collection_job_id=job_id,
+        business_disposition="new" if outcome == "created" else "existing",
         external_id=item.external_id,
         source_url=item.source_url,
         collection_status="collected",
@@ -188,8 +201,10 @@ def upsert(db, source: Source, item: Candidate) -> str:
             source_record_id=record.id,
             business_id=business.id,
             candidate_business_id=(
-                match.candidate.id if match and match.candidate
-                else business.id if classification == MatchClass.EXACT
+                match.candidate.id
+                if match and match.candidate
+                else business.id
+                if classification == MatchClass.EXACT
                 else None
             ),
             classification=classification.value,
@@ -206,8 +221,18 @@ def _field_quality(source: Source, item: Candidate) -> dict[str, int]:
     configured = source.config.get("field_quality", {})
     quality = {}
     for field in (
-        "name", "website", "city", "region", "address", "postal_code", "latitude",
-        "longitude", "categories", "email", "phone", "description",
+        "name",
+        "website",
+        "city",
+        "region",
+        "address",
+        "postal_code",
+        "latitude",
+        "longitude",
+        "categories",
+        "email",
+        "phone",
+        "description",
     ):
         value = getattr(item, field)
         if value is None or value == "" or value == []:

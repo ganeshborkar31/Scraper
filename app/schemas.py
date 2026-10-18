@@ -69,11 +69,12 @@ class GeographicBounds(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=500)
+    query: str = Field(min_length=1, max_length=200)
     country: str = Field(min_length=2, max_length=2)
-    city: str | None = None
-    category: str | None = None
-    source_ids: list[str] | None = None
+    region: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=200)
+    source_ids: list[str] | None = Field(default=None, max_length=20)
     max_results: int = Field(default=100, ge=1, le=1000)
     bounds: GeographicBounds | None = None
 
@@ -81,3 +82,18 @@ class SearchRequest(BaseModel):
     @classmethod
     def country_upper(cls, value: str) -> str:
         return value.upper()
+
+    @field_validator("query", "region", "city", "category")
+    @classmethod
+    def nonblank_text(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def unique_sources(self):
+        if self.source_ids and len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError("source_ids must not contain duplicates")
+        return self

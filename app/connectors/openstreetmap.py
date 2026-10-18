@@ -47,7 +47,11 @@ class OpenStreetMapConnector(BaseConnector):
         user_agent = str(config.get("user_agent", "")).strip()
         if not valid_endpoint:
             return False, "Overpass endpoint must be the reviewed HTTPS overpass-api.de interpreter"
-        if not user_agent or "python-requests" in user_agent.lower() or "python-httpx" in user_agent.lower():
+        if (
+            not user_agent
+            or "python-requests" in user_agent.lower()
+            or "python-httpx" in user_agent.lower()
+        ):
             return False, "configure an identifying application User-Agent"
         return True, None
 
@@ -55,10 +59,20 @@ class OpenStreetMapConnector(BaseConnector):
         # Avoid a health probe that creates extra demand on the shared public API.
         return self.validate(config)[0]
 
+    def supports(self, request: SearchRequest, config: dict[str, Any]) -> tuple[bool, str | None]:
+        if request.bounds is None:
+            return False, "OpenStreetMap requires bounds no larger than 0.1 by 0.1 degrees"
+        category = (request.category or "").strip().lower()
+        if category not in CATEGORY_TAGS:
+            return False, f"unsupported OpenStreetMap category: {category or '(missing)'}"
+        return True, None
+
     @staticmethod
     def build_query(request: SearchRequest, config: dict[str, Any]) -> str:
         if request.bounds is None:
-            raise ConnectorError(ConnectorErrorKind.CONFIGURATION, "a small geographic bounds is required")
+            raise ConnectorError(
+                ConnectorErrorKind.CONFIGURATION, "a small geographic bounds is required"
+            )
         category = (request.category or "").strip().lower()
         tags = CATEGORY_TAGS.get(category)
         if not tags:
@@ -73,9 +87,7 @@ class OpenStreetMapConnector(BaseConnector):
             request.max_results,
             max(1, int(config.get("max_results", MAX_RESULTS))),
         )
-        selections = "\n".join(
-            f'  nwr["{key}"="{value}"]({bbox});' for key, value in tags
-        )
+        selections = "\n".join(f'  nwr["{key}"="{value}"]({bbox});' for key, value in tags)
         # The server-side output cap plus strict bounds and timeout keep this request small.
         return f"[out:json][timeout:25][maxsize:536870912];\n(\n{selections}\n);\nout center {max_results};"
 
@@ -98,9 +110,13 @@ class OpenStreetMapConnector(BaseConnector):
                     timeout=httpx.Timeout(35.0, connect=10.0),
                 )
             except httpx.TimeoutException as exc:
-                raise ConnectorError(ConnectorErrorKind.TIMEOUT, "Overpass request timed out") from exc
+                raise ConnectorError(
+                    ConnectorErrorKind.TIMEOUT, "Overpass request timed out"
+                ) from exc
             except httpx.HTTPError as exc:
-                raise ConnectorError(ConnectorErrorKind.UNAVAILABLE, "Overpass service is unavailable") from exc
+                raise ConnectorError(
+                    ConnectorErrorKind.UNAVAILABLE, "Overpass service is unavailable"
+                ) from exc
             finally:
                 _last_request_at = time.monotonic()
         if response.status_code == 429:
@@ -110,34 +126,60 @@ class OpenStreetMapConnector(BaseConnector):
             except ValueError:
                 retry_seconds = None
             raise ConnectorError(
-                ConnectorErrorKind.RATE_LIMITED, "Overpass rate limit reached", retry_after=retry_seconds
+                ConnectorErrorKind.RATE_LIMITED,
+                "Overpass rate limit reached",
+                retry_after=retry_seconds,
             )
         if response.status_code in {401, 403}:
             raise ConnectorError(ConnectorErrorKind.AUTHENTICATION, "Overpass rejected the request")
         if response.status_code >= 500:
-            raise ConnectorError(ConnectorErrorKind.TEMPORARY_SERVER, "Overpass returned a server error")
+            raise ConnectorError(
+                ConnectorErrorKind.TEMPORARY_SERVER, "Overpass returned a server error"
+            )
         if response.status_code >= 400:
             raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "Overpass rejected the query")
         try:
             payload = response.json()
         except ValueError as exc:
-            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "Overpass returned invalid JSON") from exc
+            raise ConnectorError(
+                ConnectorErrorKind.INVALID_RESPONSE, "Overpass returned invalid JSON"
+            ) from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
-            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "Overpass response has no elements list")
+            raise ConnectorError(
+                ConnectorErrorKind.INVALID_RESPONSE, "Overpass response has no elements list"
+            )
         return payload
 
     def parse(self, response: Any, config: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(response, dict) or not isinstance(response.get("elements"), list):
-            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "Overpass response has no elements list")
+            raise ConnectorError(
+                ConnectorErrorKind.INVALID_RESPONSE, "Overpass response has no elements list"
+            )
         request = config.get("_request")
         if not isinstance(request, SearchRequest):
-            raise ConnectorError(ConnectorErrorKind.CONFIGURATION, "collection request context is missing")
+            raise ConnectorError(
+                ConnectorErrorKind.CONFIGURATION, "collection request context is missing"
+            )
         output = []
         for element in response["elements"]:
             if not isinstance(element, dict):
                 output.append(element)
                 continue
-            output.append(self._candidate_fields(element, request))
+            candidate = self._candidate_fields(element, request)
+            tags = element.get("tags") if isinstance(element.get("tags"), dict) else {}
+            if tags.get("name") and request.query.casefold() not in str(tags["name"]).casefold():
+                continue
+            if (
+                request.city
+                and str(candidate.get("city") or "").casefold() != request.city.casefold()
+            ):
+                continue
+            if (
+                request.region
+                and str(candidate.get("region") or "").casefold() != request.region.casefold()
+            ):
+                continue
+            output.append(candidate)
         return output
 
     @staticmethod
@@ -148,17 +190,33 @@ class OpenStreetMapConnector(BaseConnector):
         location = element.get("center") if isinstance(element.get("center"), dict) else element
         osm_type, osm_id = element.get("type"), element.get("id")
         address_parts = [tags.get("addr:housenumber"), tags.get("addr:street")]
-        address = str(tags.get("addr:full") or " ".join(
-            str(part).strip() for part in address_parts if part
-        ))
+        address = str(
+            tags.get("addr:full") or " ".join(str(part).strip() for part in address_parts if part)
+        )
         category = next(
-            (f"{key}:{tags[key]}" for key in ("shop", "amenity", "craft", "office") if tags.get(key)),
+            (
+                f"{key}:{tags[key]}"
+                for key in ("shop", "amenity", "craft", "office")
+                if tags.get(key)
+            ),
             request.category or "business",
         )
         retained_tag_keys = {
-            "name", "shop", "amenity", "craft", "office", "addr:full", "addr:housenumber",
-            "addr:street", "addr:city", "addr:state", "addr:postcode", "website",
-            "contact:website", "phone", "contact:phone",
+            "name",
+            "shop",
+            "amenity",
+            "craft",
+            "office",
+            "addr:full",
+            "addr:housenumber",
+            "addr:street",
+            "addr:city",
+            "addr:state",
+            "addr:postcode",
+            "website",
+            "contact:website",
+            "phone",
+            "contact:phone",
         }
         return {
             "name": tags.get("name", ""),

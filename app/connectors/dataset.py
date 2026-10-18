@@ -14,6 +14,11 @@ class DatasetConnector(BaseConnector):
         valid = path.is_file() and path.suffix.lower() in {".csv", ".json"}
         return valid, None if valid else "dataset must be an available CSV or JSON file"
 
+    def supports(self, request: SearchRequest, config: dict) -> tuple[bool, str | None]:
+        if request.bounds:
+            return False, "local dataset connector does not apply geographic bounds"
+        return True, None
+
     def discover(self, request: SearchRequest, config: dict) -> list[dict]:
         path = Path(config["path"]).resolve()
         try:
@@ -24,11 +29,17 @@ class DatasetConnector(BaseConnector):
                     else list(csv.DictReader(handle))
                 )
         except json.JSONDecodeError as exc:
-            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "dataset contains invalid JSON") from exc
+            raise ConnectorError(
+                ConnectorErrorKind.INVALID_RESPONSE, "dataset contains invalid JSON"
+            ) from exc
         except OSError as exc:
-            raise ConnectorError(ConnectorErrorKind.UNAVAILABLE, "dataset file could not be read") from exc
+            raise ConnectorError(
+                ConnectorErrorKind.UNAVAILABLE, "dataset file could not be read"
+            ) from exc
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "dataset must contain a list of records")
+            raise ConnectorError(
+                ConnectorErrorKind.INVALID_RESPONSE, "dataset must contain a list of records"
+            )
         output = []
         terms = request.query.lower().split()
         for row in rows:
@@ -36,6 +47,18 @@ class DatasetConnector(BaseConnector):
             if row_country and str(row_country).upper() != request.country:
                 continue
             if request.city and str(row.get("city", "")).casefold() != request.city.casefold():
+                continue
+            if (
+                request.region
+                and str(row.get("region", "")).casefold() != request.region.casefold()
+            ):
+                continue
+            categories = row.get("categories") or []
+            if isinstance(categories, str):
+                categories = [categories]
+            if request.category and request.category.casefold() not in {
+                str(category).casefold() for category in categories
+            }:
                 continue
             name = row.get("name")
             if terms and name and not all(term in str(name).lower() for term in terms):

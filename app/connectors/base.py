@@ -57,6 +57,10 @@ class Connector(Protocol):
 
     def collect(self, request: SearchRequest, config: dict[str, Any]) -> ConnectorBatch: ...
 
+    def supports(
+        self, request: SearchRequest, config: dict[str, Any]
+    ) -> tuple[bool, str | None]: ...
+
 
 class BaseConnector:
     """Convenience lifecycle for connectors that discover then fetch records.
@@ -72,6 +76,9 @@ class BaseConnector:
     def health_check(self, config: dict[str, Any]) -> bool:
         valid, _ = self.validate(config)
         return valid
+
+    def supports(self, request: SearchRequest, config: dict[str, Any]) -> tuple[bool, str | None]:
+        return True, None
 
     def discover(self, request: SearchRequest, config: dict[str, Any]):
         """Return source-specific identifiers or raw records; override per source."""
@@ -95,9 +102,22 @@ class BaseConnector:
         try:
             normalized = dict(record)
             candidate_fields = {
-                "name", "country", "website", "city", "region", "address", "postal_code",
-                "latitude", "longitude", "categories", "email", "phone", "description",
-                "external_id", "source_url", "synthetic",
+                "name",
+                "country",
+                "website",
+                "city",
+                "region",
+                "address",
+                "postal_code",
+                "latitude",
+                "longitude",
+                "categories",
+                "email",
+                "phone",
+                "description",
+                "external_id",
+                "source_url",
+                "synthetic",
             }
             source_values = {key: value for key, value in record.items() if key in candidate_fields}
             normalized.setdefault("raw_values", source_values)
@@ -134,10 +154,14 @@ class BaseConnector:
                             try:
                                 batch.records.append(self.normalize(record, config))
                             except ConnectorError as exc:
-                                batch.issues.append(ConnectorIssue(exc.kind, str(exc), index, exc.retry_after))
+                                batch.issues.append(
+                                    ConnectorIssue(exc.kind, str(exc), index, exc.retry_after)
+                                )
                             index += 1
                     except ConnectorError as exc:
-                        batch.issues.append(ConnectorIssue(exc.kind, str(exc), index, exc.retry_after))
+                        batch.issues.append(
+                            ConnectorIssue(exc.kind, str(exc), index, exc.retry_after)
+                        )
                         index += 1
         except ConnectorError:
             raise

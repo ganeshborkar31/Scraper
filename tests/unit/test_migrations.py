@@ -24,10 +24,18 @@ def test_migrations_upgrade_clean_sqlite_database(tmp_path):
     assert {"website", "verified_at", "created_at", "updated_at"}.issubset(
         {column["name"] for column in inspector.get_columns("businesses")}
     )
-    assert {"source_identifier", "source_name", "first_seen", "last_seen", "collection_status"}.issubset(
+    assert {
+        "source_identifier",
+        "source_name",
+        "first_seen",
+        "last_seen",
+        "collection_status",
+    }.issubset({column["name"] for column in inspector.get_columns("source_records")})
+    assert "bounds" in {column["name"] for column in inspector.get_columns("jobs")}
+    assert "region" in {column["name"] for column in inspector.get_columns("jobs")}
+    assert {"collection_job_id", "business_disposition"}.issubset(
         {column["name"] for column in inspector.get_columns("source_records")}
     )
-    assert "bounds" in {column["name"] for column in inspector.get_columns("jobs")}
     assert {"normalized_address", "normalized_phone", "field_quality_json"}.issubset(
         {column["name"] for column in inspector.get_columns("businesses")}
     )
@@ -43,22 +51,27 @@ def test_matching_migration_upgrades_existing_phase4_schema_and_backfills_keys(t
     engine = create_engine(url)
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as session:
-        source = Source(
-            code="legacy", name="Legacy", source_type="test", connector="dataset"
-        )
+        source = Source(code="legacy", name="Legacy", source_type="test", connector="dataset")
         session.add(source)
         session.flush()
         business = Business(
-            name="Café Books", normalized_name="old normalizer",
-            domain="www.cafe.example", website="https://WWW.Cafe.example/",
-            country="US", address=" 10 Café St ", phone="+1 (415) 555-0100",
+            name="Café Books",
+            normalized_name="old normalizer",
+            domain="www.cafe.example",
+            website="https://WWW.Cafe.example/",
+            country="US",
+            address=" 10 Café St ",
+            phone="+1 (415) 555-0100",
         )
         session.add(business)
         session.flush()
         session.add(
             SourceRecord(
-                source_id=source.id, source_identifier=source.code, source_name=source.name,
-                business_id=business.id, external_id="legacy-1",
+                source_id=source.id,
+                source_identifier=source.code,
+                source_name=source.name,
+                business_id=business.id,
+                external_id="legacy-1",
             )
         )
         session.commit()
@@ -88,9 +101,11 @@ def test_matching_migration_upgrades_existing_phase4_schema_and_backfills_keys(t
     from sqlalchemy import text
 
     with engine.connect() as connection:
-        row = connection.execute(
-            text("SELECT * FROM businesses WHERE name='Café Books'")
-        ).mappings().one()
+        row = (
+            connection.execute(text("SELECT * FROM businesses WHERE name='Café Books'"))
+            .mappings()
+            .one()
+        )
         assert row["normalized_name"] == "cafe books"
         assert row["domain"] == "cafe.example"
         assert row["normalized_address"] == "10 cafe st"

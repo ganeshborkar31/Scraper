@@ -13,6 +13,7 @@ from app.core.settings import settings
 from app.db import models
 from app.db.session import Base, SessionLocal, engine
 from app.schemas import SearchRequest
+from app.services.discovery import source_compatibility
 from app.services.merges import MergeError, merge_businesses, reverse_business_merge
 from app.tasks.celery_app import run_job
 
@@ -167,12 +168,54 @@ def sources(_: str = Depends(admin), db: Session = Depends(session)):
 async def create_job(
     payload: SearchRequest, db: Session = Depends(session), _: str = Depends(admin)
 ):
+    configured = db.query(models.Source).all()
+    by_id = {source.id: source for source in configured}
+    if payload.source_ids:
+        unknown = sorted(set(payload.source_ids) - set(by_id))
+        if unknown:
+            raise HTTPException(
+                422, detail={"message": "Unknown source IDs", "source_ids": unknown}
+            )
+        selected = [by_id[source_id] for source_id in payload.source_ids]
+    else:
+        selected = configured
+    compatible, unsupported = [], []
+    for source in selected:
+        supported, reason = source_compatibility(source, payload)
+        if supported:
+            compatible.append(source)
+        else:
+            unsupported.append({"id": source.id, "code": source.code, "reason": reason})
+    if payload.source_ids and unsupported:
+        raise HTTPException(
+            422,
+            detail={
+                "message": "Selected sources cannot support this request",
+                "sources": unsupported,
+            },
+        )
+    if not compatible:
+        raise HTTPException(
+            422,
+            detail={
+                "message": "No configured source supports this request",
+                "sources": unsupported,
+            },
+        )
+    if len(compatible) > 20:
+        raise HTTPException(
+            422,
+            detail={
+                "message": "More than 20 sources support this request; select up to 20 explicitly"
+            },
+        )
     job = models.Job(
         query=payload.query,
         country=payload.country,
+        region=payload.region,
         city=payload.city,
         category=payload.category,
-        source_ids=payload.source_ids or [],
+        source_ids=[source.id for source in compatible],
         bounds=payload.bounds.model_dump() if payload.bounds else None,
         max_results=payload.max_results,
     )
@@ -186,7 +229,12 @@ async def create_job(
         job.status, job.error = "failed", "Background queue unavailable"
         db.commit()
         raise HTTPException(status_code=503, detail="Background queue unavailable")
-    return {"id": job.id, "status": job.status}
+    return {
+        "id": job.id,
+        "status": job.status,
+        "selected_sources": [{"id": source.id, "code": source.code} for source in compatible],
+        "unsupported_sources": unsupported,
+    }
 
 
 @app.get("/jobs")
@@ -200,6 +248,7 @@ def list_jobs(
             "id": j.id,
             "query": j.query,
             "country": j.country,
+            "region": j.region,
             "bounds": j.bounds,
             "status": j.status,
             "created_at": j.created_at,
@@ -220,6 +269,7 @@ def get_job(job_id: str, _: str = Depends(admin), db: Session = Depends(session)
         "id": job.id,
         "query": job.query,
         "country": job.country,
+        "region": job.region,
         "bounds": job.bounds,
         "status": job.status,
         "created_at": job.created_at,
@@ -227,6 +277,71 @@ def get_job(job_id: str, _: str = Depends(admin), db: Session = Depends(session)
         "completed_at": job.completed_at,
         "outcome": job.outcome,
         "error": job.error,
+    }
+
+
+@app.get("/jobs/{job_id}/results")
+def job_results(
+    job_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    disposition: str = "all",
+    _: str = Depends(admin),
+    db: Session = Depends(session),
+):
+    if not 1 <= limit <= 200 or offset < 0:
+        raise HTTPException(422, "invalid pagination")
+    if disposition not in {"all", "new", "existing"}:
+        raise HTTPException(422, "disposition must be all, new, or existing")
+    if not db.get(models.Job, job_id):
+        raise HTTPException(404, "Job not found")
+    records = (
+        db.query(models.SourceRecord, models.Business, models.Source)
+        .join(models.Business, models.Business.id == models.SourceRecord.business_id)
+        .join(models.Source, models.Source.id == models.SourceRecord.source_id)
+        .filter(models.SourceRecord.collection_job_id == job_id)
+        .order_by(models.SourceRecord.collected_at, models.SourceRecord.id)
+        .all()
+    )
+    grouped = {}
+    for record, business, source in records:
+        row = grouped.setdefault(
+            business.id,
+            {"business": business, "disposition": "existing", "sources": []},
+        )
+        if record.business_disposition == "new":
+            row["disposition"] = "new"
+        if not any(entry["source_id"] == source.id for entry in row["sources"]):
+            row["sources"].append(
+                {
+                    "source_id": source.id,
+                    "source_code": source.code,
+                    "source_url": record.source_url,
+                }
+            )
+    rows = [
+        row for row in grouped.values() if disposition == "all" or row["disposition"] == disposition
+    ]
+    total = len(rows)
+    page = rows[offset : offset + limit]
+    return {
+        "job_id": job_id,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [
+            {
+                "id": row["business"].id,
+                "name": row["business"].name,
+                "country": row["business"].country,
+                "region": row["business"].region,
+                "city": row["business"].city,
+                "categories": row["business"].categories,
+                "disposition": row["disposition"],
+                "sources": row["sources"],
+            }
+            for row in page
+        ],
     }
 
 
@@ -324,8 +439,11 @@ def merge_business_endpoint(
     except MergeError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from exc
-    return {"merge_id": event.id, "source_business_id": source_business_id,
-            "target_business_id": target_business_id}
+    return {
+        "merge_id": event.id,
+        "source_business_id": source_business_id,
+        "target_business_id": target_business_id,
+    }
 
 
 @app.post("/merges/{merge_id}/reverse")

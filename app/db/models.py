@@ -45,8 +45,12 @@ class Source(Base):
 class Business(Base):
     __tablename__ = "businesses"
     __table_args__ = (
-        CheckConstraint("latitude IS NULL OR latitude BETWEEN -90 AND 90", name="ck_business_latitude"),
-        CheckConstraint("longitude IS NULL OR longitude BETWEEN -180 AND 180", name="ck_business_longitude"),
+        CheckConstraint(
+            "latitude IS NULL OR latitude BETWEEN -90 AND 90", name="ck_business_latitude"
+        ),
+        CheckConstraint(
+            "longitude IS NULL OR longitude BETWEEN -180 AND 180", name="ck_business_longitude"
+        ),
         Index("ix_business_country_city", "country", "city"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -93,6 +97,8 @@ class SourceRecord(Base):
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    collection_job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), index=True)
+    business_disposition: Mapped[str | None] = mapped_column(String(16))
     collection_status: Mapped[str] = mapped_column(String(32), default="collected")
     payload_hash: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -132,6 +138,7 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     query: Mapped[str] = mapped_column(String(500))
     country: Mapped[str] = mapped_column(String(2))
+    region: Mapped[str | None] = mapped_column(String(200))
     city: Mapped[str | None] = mapped_column(String(200))
     category: Mapped[str | None] = mapped_column(String(200))
     source_ids: Mapped[list] = mapped_column(JSON, default=list)
