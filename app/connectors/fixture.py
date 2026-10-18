@@ -11,7 +11,10 @@ class FixtureConnector(BaseConnector):
 
     def validate(self, config: dict[str, Any]) -> tuple[bool, str | None]:
         rows = config.get("records")
-        return (isinstance(rows, list), None if isinstance(rows, list) else "records must be a list")
+        return (
+            isinstance(rows, list),
+            None if isinstance(rows, list) else "records must be a list",
+        )
 
     def discover(self, request: SearchRequest, config: dict[str, Any]):
         rows = config.get("records", [])
@@ -21,4 +24,3 @@ class FixtureConnector(BaseConnector):
 
     def pages(self, request: SearchRequest, config: dict[str, Any]):
         yield from self.discover(request, config)
-

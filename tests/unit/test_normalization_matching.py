@@ -36,25 +36,37 @@ def test_normalizers_fold_names_domains_phones_addresses_and_round_coordinates()
 def test_equivalent_domains_and_addresses_match_exactly_and_raw_values_are_kept():
     db = database()
     a, b = source(db, "a"), source(db, "b")
-    assert upsert(
-        db,
-        a,
-        Candidate(
-            name="Café Market", country="US", website="https://www.market.example/shop",
-            address="10 Café Street", raw_values={"website": "HTTPS://WWW.MARKET.EXAMPLE/shop"},
-        ),
-    ) == "created"
+    assert (
+        upsert(
+            db,
+            a,
+            Candidate(
+                name="Café Market",
+                country="US",
+                website="https://www.market.example/shop",
+                address="10 Café Street",
+                raw_values={"website": "HTTPS://WWW.MARKET.EXAMPLE/shop"},
+            ),
+        )
+        == "created"
+    )
     db.commit()
-    assert upsert(
-        db,
-        b,
-        Candidate(
-            name="Cafe Market", country="US", website="market.example", address="10 Cafe Street"
-        ),
-    ) == "updated"
+    assert (
+        upsert(
+            db,
+            b,
+            Candidate(
+                name="Cafe Market", country="US", website="market.example", address="10 Cafe Street"
+            ),
+        )
+        == "updated"
+    )
     db.commit()
     assert db.query(Business).count() == 1
-    assert db.query(MatchDecision).order_by(MatchDecision.created_at.desc()).first().classification == "exact"
+    assert (
+        db.query(MatchDecision).order_by(MatchDecision.created_at.desc()).first().classification
+        == "exact"
+    )
     records = db.query(SourceRecord).order_by(SourceRecord.source_identifier).all()
     assert records[0].raw_values_json == {"website": "HTTPS://WWW.MARKET.EXAMPLE/shop"}
 
@@ -65,18 +77,36 @@ def test_similar_names_at_different_addresses_and_branches_remain_distinct():
     upsert(
         db,
         a,
-        Candidate(name="North Star Books", country="US", website="northstar.example", address="10 Main Street", city="Oakland"),
+        Candidate(
+            name="North Star Books",
+            country="US",
+            website="northstar.example",
+            address="10 Main Street",
+            city="Oakland",
+        ),
     )
     db.commit()
     upsert(
         db,
         b,
-        Candidate(name="North Star Bookshop", country="US", website="northstar.example", address="200 Broadway", city="Oakland"),
+        Candidate(
+            name="North Star Bookshop",
+            country="US",
+            website="northstar.example",
+            address="200 Broadway",
+            city="Oakland",
+        ),
     )
     upsert(
         db,
         b,
-        Candidate(name="North Star Books", country="US", website="northstar.example", address="12 Main Street", city="Oakland"),
+        Candidate(
+            name="North Star Books",
+            country="US",
+            website="northstar.example",
+            address="12 Main Street",
+            city="Oakland",
+        ),
     )
     db.commit()
     assert db.query(Business).count() == 3
@@ -88,7 +118,9 @@ def test_missing_contacts_are_safe_and_exact_source_payload_is_idempotent():
     db = database()
     provider = source(db, "no-contact")
     item = Candidate(
-        name="Corner Shop", country="GB", city="Bristol",
+        name="Corner Shop",
+        country="GB",
+        city="Bristol",
         raw_values={"name": "Corner Shop", "country": "gb", "city": "Bristol"},
     )
     assert upsert(db, provider, item) == "created"
@@ -109,8 +141,12 @@ def test_conflicting_lower_quality_source_does_not_replace_better_canonical_data
         db,
         trusted,
         Candidate(
-            name="Acme Market", country="US", external_id="trusted-1",
-            website="https://acme.example", address="1 Market Street", phone="+1 415 555 0100",
+            name="Acme Market",
+            country="US",
+            external_id="trusted-1",
+            website="https://acme.example",
+            address="1 Market Street",
+            phone="+1 415 555 0100",
         ),
     )
     db.commit()
@@ -118,8 +154,12 @@ def test_conflicting_lower_quality_source_does_not_replace_better_canonical_data
         db,
         weak,
         Candidate(
-            name="Acme Market", country="US", external_id="weak-9",
-            website="https://wrong.example", address="1 Market Street", phone="555-0000",
+            name="Acme Market",
+            country="US",
+            external_id="weak-9",
+            website="https://wrong.example",
+            address="1 Market Street",
+            phone="555-0000",
         ),
     )
     db.commit()
@@ -142,7 +182,12 @@ def test_likely_matches_are_recorded_without_automatic_merge_and_thresholds_are_
     assert decisions[1].classification == "likely"
     assert decisions[1].auto_merged is False
     assert decisions[1].candidate_business_id == decisions[0].business_id
-    assert MatchingRules.from_config({"likely_threshold": 0.7, "uncertain_threshold": 0.4}).likely_threshold == 0.7
+    assert (
+        MatchingRules.from_config(
+            {"likely_threshold": 0.7, "uncertain_threshold": 0.4}
+        ).likely_threshold
+        == 0.7
+    )
 
 
 def test_name_only_similarity_is_uncertain_and_not_merged():

@@ -1,4 +1,5 @@
 """Initial application schema."""
+
 from alembic import op
 from app.db import models  # noqa: F401
 from app.db.session import Base

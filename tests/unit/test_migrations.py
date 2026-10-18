@@ -64,6 +64,21 @@ def test_migrations_upgrade_clean_sqlite_database(tmp_path):
         "retry_limit",
         "retry_count",
     }.issubset({column["name"] for column in inspector.get_columns("jobs")})
+    assert {
+        "job_type",
+        "trigger_type",
+        "execution_timeout_seconds",
+        "worker_lease_token",
+        "last_attempt_at",
+        "last_enqueued_at",
+        "cancellation_requested_at",
+    }.issubset({column["name"] for column in inspector.get_columns("jobs")})
+    assert "job_record_key" in {
+        column["name"] for column in inspector.get_columns("source_records")
+    }
+    assert "uq_source_record_job_key" in {
+        index["name"] for index in inspector.get_indexes("source_records")
+    } | {constraint["name"] for constraint in inspector.get_unique_constraints("source_records")}
 
 
 def test_matching_migration_upgrades_existing_phase4_schema_and_backfills_keys(tmp_path):

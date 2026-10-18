@@ -34,7 +34,9 @@ def normalize_address(value: str | None) -> str | None:
     return normalized or None
 
 
-def normalize_coordinates(latitude: float | None, longitude: float | None) -> tuple[float | None, float | None]:
+def normalize_coordinates(
+    latitude: float | None, longitude: float | None
+) -> tuple[float | None, float | None]:
     return (
         round(latitude, 6) if latitude is not None else None,
         round(longitude, 6) if longitude is not None else None,

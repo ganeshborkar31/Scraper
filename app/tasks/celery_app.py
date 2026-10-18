@@ -1,8 +1,14 @@
 from celery import Celery
 
 from app.core.settings import settings
+from app.db.models import now
 from app.services.ingest import ingest_job
-from app.services.scheduling import refresh_execution_status, transient_failure_kinds
+from app.services.job_state import transition_job
+from app.services.scheduling import (
+    refresh_execution_status,
+    retry_after_seconds,
+    transient_failure_kinds,
+)
 
 celery = Celery(
     "business_discovery",
@@ -41,11 +47,19 @@ def run_job(self, job_id: str) -> None:
         db.close()
         return
     job.retry_count += 1
-    job.status = "retrying"
-    job.error = f"Retry {job.retry_count}/{retry_limit} after transient source failure: {', '.join(transient)}"
+    backoff = min(600, 30 * (2 ** (job.retry_count - 1)))
+    countdown = max(backoff, retry_after_seconds(job) or 0)
+    # Recovery must not bypass a source's Retry-After while Celery holds the retry.
+    from datetime import timedelta
+
+    job.last_enqueued_at = now() + timedelta(seconds=countdown)
+    transition_job(
+        job,
+        "retrying",
+        error=f"Retry {job.retry_count}/{retry_limit} after transient source failure: {', '.join(transient)}",
+    )
     refresh_execution_status(db, job)
     db.commit()
-    countdown = min(600, 30 * (2 ** (job.retry_count - 1)))
     db.close()
     raise self.retry(
         exc=RuntimeError("transient source failure"),
@@ -66,6 +80,19 @@ def dispatch_schedules() -> None:
         db.close()
 
 
+@celery.task(name="recover_stale_jobs")
+def recover_stale_jobs() -> None:
+    from app.db.session import SessionLocal
+    from app.services.scheduling import recover_jobs
+
+    db = SessionLocal()
+    try:
+        recover_jobs(db, run_job.delay)
+    finally:
+        db.close()
+
+
 celery.conf.beat_schedule = {
-    "check-persisted-schedules": {"task": "dispatch_schedules", "schedule": 60.0}
+    "check-persisted-schedules": {"task": "dispatch_schedules", "schedule": 60.0},
+    "recover-abandoned-jobs": {"task": "recover_stale_jobs", "schedule": 60.0},
 }

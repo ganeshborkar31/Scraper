@@ -11,8 +11,9 @@
 - [x] Phase 5 normalization, conservative match classifications, quality-aware updates, source value retention, and reversible merge audit.
 - [x] Phase 6 on-demand discovery with source compatibility selection, trackable Celery jobs, and paginated new/existing results.
 - [x] Phase 7 scheduled collection with atomic dispatch claims, overlap controls, source limits, pause/resume, execution history, and transient retries.
+- [x] Phase 8 background reliability with explicit job transitions, atomic worker claims, bounded retries, idempotent source observations, per-source outcomes, cancellation, and stale job recovery.
 - [ ] Broader live connectors, robust distributed rate limiting, and crawler policy enforcement.
-- [ ] Schedule editing/cancellation, per-source outcome UI, and complete deployed integration tests.
+- [ ] Schedule editing/cancellation for existing child jobs, worker health and per-source outcome UI, and complete deployed integration tests.
 
 ## Current execution
 

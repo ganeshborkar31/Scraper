@@ -55,7 +55,7 @@ def test_overpass_saved_response_parses_fields_and_reports_invalid_record(monkey
     connector = OpenStreetMapConnector()
     batch = connector.collect(request(), CONFIG)
 
-    assert "nwr[\"shop\"=\"bakery\"]" in posted["data"]["data"]
+    assert 'nwr["shop"="bakery"]' in posted["data"]["data"]
     assert "out center 4;" in posted["data"]["data"]
     assert posted["headers"]["User-Agent"] == CONFIG["user_agent"]
     assert len(batch.records) == 2
@@ -93,7 +93,10 @@ def test_osm_records_persist_with_provenance_and_repeat_without_duplicate_busine
         config=CONFIG,
     )
     job = Job(
-        query="bakery", country="US", category="bakery", bounds=request().bounds.model_dump(),
+        query="bakery",
+        country="US",
+        category="bakery",
+        bounds=request().bounds.model_dump(),
         max_results=5,
     )
     db.add_all([source, job])
@@ -114,6 +117,7 @@ def test_osm_records_persist_with_provenance_and_repeat_without_duplicate_busine
         == "malformed_record"
     )
     assert db.query(Business).count() == 2
+    assert db.query(SourceRecord).count() == 2
     record = db.query(SourceRecord).filter_by(external_id="node/123456").first()
     assert record.source_identifier == "openstreetmap-overpass"
     assert record.source_url == "https://www.openstreetmap.org/node/123456"
@@ -164,6 +168,8 @@ def test_overpass_requires_small_bounds_and_known_category():
         connector.build_query(request().model_copy(update={"category": "unknown"}), CONFIG)
     with pytest.raises(ValueError, match="collection bounds"):
         SearchRequest(
-            query="bakery", country="US", category="bakery",
+            query="bakery",
+            country="US",
+            category="bakery",
             bounds={"south": 37, "west": -123, "north": 38, "east": -122},
         )

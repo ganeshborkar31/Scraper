@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -86,6 +87,9 @@ class SourceRecord(Base):
     __table_args__ = (
         Index("ix_source_records_source_external", "source_id", "external_id"),
         Index("ix_source_records_seen", "first_seen", "last_seen"),
+        UniqueConstraint(
+            "collection_job_id", "source_id", "job_record_key", name="uq_source_record_job_key"
+        ),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"))
@@ -99,6 +103,7 @@ class SourceRecord(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     collection_job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), index=True)
     business_disposition: Mapped[str | None] = mapped_column(String(16))
+    job_record_key: Mapped[str | None] = mapped_column(String(64))
     collection_status: Mapped[str] = mapped_column(String(32), default="collected")
     payload_hash: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -142,6 +147,8 @@ class Job(Base):
     city: Mapped[str | None] = mapped_column(String(200))
     category: Mapped[str | None] = mapped_column(String(200))
     source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    job_type: Mapped[str] = mapped_column(String(40), default="collection")
+    trigger_type: Mapped[str] = mapped_column(String(24), default="manual")
     bounds: Mapped[dict | None] = mapped_column(JSON)
     max_results: Mapped[int] = mapped_column(Integer, default=100)
     source_limits: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -151,6 +158,11 @@ class Job(Base):
     )
     retry_limit: Mapped[int] = mapped_column(Integer, default=3)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    execution_timeout_seconds: Mapped[int] = mapped_column(Integer, default=1800)
+    worker_lease_token: Mapped[str | None] = mapped_column(String(36))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=now)
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(32), default="queued")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

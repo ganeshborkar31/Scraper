@@ -33,15 +33,31 @@ def test_ingest_isolates_connector_errors_and_keeps_provenance(monkeypatch):
     factory = sessionmaker(bind=engine)
     db = factory()
     healthy = Source(
-        code="fixture-ok", name="Fixture", source_type="test", connector="fixture",
-        enabled=True, review_status="approved", config={"records": [
-            {"name": "Sample Shop", "country": "US", "external_id": "sample-1",
-             "source_url": "https://fixture.invalid/sample-1"}
-        ]},
+        code="fixture-ok",
+        name="Fixture",
+        source_type="test",
+        connector="fixture",
+        enabled=True,
+        review_status="approved",
+        config={
+            "records": [
+                {
+                    "name": "Sample Shop",
+                    "country": "US",
+                    "external_id": "sample-1",
+                    "source_url": "https://fixture.invalid/sample-1",
+                }
+            ]
+        },
     )
     failing = Source(
-        code="fixture-fail", name="Failing fixture", source_type="test", connector="fail",
-        enabled=True, review_status="approved", config={},
+        code="fixture-fail",
+        name="Failing fixture",
+        source_type="test",
+        connector="fail",
+        enabled=True,
+        review_status="approved",
+        config={},
     )
     job = Job(query="sample", country="US", max_results=10)
     db.add_all([healthy, failing, job])

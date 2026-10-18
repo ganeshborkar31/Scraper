@@ -35,7 +35,9 @@ def test_same_external_id_is_idempotent():
 def test_repeat_external_id_keeps_every_source_observation():
     db = database()
     provider = source(db, "source-a")
-    candidate = Candidate(name="Acme", country="US", external_id="42", source_url="https://source.test/42")
+    candidate = Candidate(
+        name="Acme", country="US", external_id="42", source_url="https://source.test/42"
+    )
     assert upsert(db, provider, candidate) == "created"
     db.commit()
     assert upsert(db, provider, candidate) == "duplicate"
@@ -51,8 +53,13 @@ def test_business_attributes_and_database_coordinate_constraints():
     db = database()
     provider = source(db, "source-a")
     candidate = Candidate(
-        name="Acme", country="US", website="https://www.acme.example",
-        latitude=37.5, longitude=-122.2, categories=["retail"], email="hello@acme.example",
+        name="Acme",
+        country="US",
+        website="https://www.acme.example",
+        latitude=37.5,
+        longitude=-122.2,
+        categories=["retail"],
+        email="hello@acme.example",
     )
     upsert(db, provider, candidate)
     db.commit()
@@ -90,7 +97,6 @@ def test_duplicate_source_entity_can_have_multiple_observations():
     assert db.query(SourceRecord).filter_by(source_id=provider.id, external_id="42").count() == 2
 
 
-
 def test_domain_matches_across_sources_and_similar_names_stay_distinct():
     db = database()
     first_source = source(db, "source-a")
@@ -100,8 +106,11 @@ def test_domain_matches_across_sources_and_similar_names_stay_distinct():
             db,
             first_source,
             Candidate(
-                name="North Star", country="GB", website="north.example",
-                address="10 High Street", city="London",
+                name="North Star",
+                country="GB",
+                website="north.example",
+                address="10 High Street",
+                city="London",
             ),
         )
         == "created"
@@ -112,8 +121,11 @@ def test_domain_matches_across_sources_and_similar_names_stay_distinct():
             db,
             second_source,
             Candidate(
-                name="North Star", country="GB", website="https://www.north.example/path",
-                address="10 High Street", city="London",
+                name="North Star",
+                country="GB",
+                website="https://www.north.example/path",
+                address="10 High Street",
+                city="London",
             ),
         )
         == "updated"

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -195,7 +195,15 @@ def test_worker_marks_transient_job_retrying_and_schedules_backoff(monkeypatch):
         session = factory()
         target = session.get(Job, target_job_id)
         target.status = "failed"
-        target.outcome = {"sources": {"osm": {"status": "failed", "kind": "timeout"}}}
+        target.outcome = {
+            "sources": {
+                "osm": {
+                    "status": "failed",
+                    "kind": "timeout",
+                    "errors": [{"kind": "timeout", "retry_after": 45}],
+                }
+            }
+        }
         session.commit()
         session.close()
 
@@ -218,6 +226,10 @@ def test_worker_marks_transient_job_retrying_and_schedules_backoff(monkeypatch):
     retried = session.get(Job, job_id)
     assert retried.status == "retrying"
     assert retried.retry_count == 1
-    assert retry_kwargs["countdown"] == 30
+    assert retry_kwargs["countdown"] == 45
     assert retry_kwargs["max_retries"] == 2
+    enqueue_after = retried.last_enqueued_at
+    if enqueue_after.tzinfo is None:
+        enqueue_after = enqueue_after.replace(tzinfo=UTC)
+    assert enqueue_after >= now() + timedelta(seconds=44)
     session.close()

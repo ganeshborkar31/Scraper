@@ -65,20 +65,32 @@ def classify_candidate(
     same_address = bool(address_key and business.normalized_address == address_key)
     same_phone = bool(phone_key and business.normalized_phone == phone_key)
     same_domain = bool(domain_key and business.domain == domain_key)
-    same_city = bool(candidate.city and business.city and candidate.city.casefold().strip() == business.city.casefold().strip())
+    same_city = bool(
+        candidate.city
+        and business.city
+        and candidate.city.casefold().strip() == business.city.casefold().strip()
+    )
     distance = _distance_meters(business, candidate)
 
     # Conflicting location evidence is a branch boundary, even when the domain/name match.
     if business.normalized_address and address_key and business.normalized_address != address_key:
         return MatchResult(MatchClass.DISTINCT, "different_address", 0.0, business)
-    if business.city and candidate.city and business.city.casefold().strip() != candidate.city.casefold().strip():
+    if (
+        business.city
+        and candidate.city
+        and business.city.casefold().strip() != candidate.city.casefold().strip()
+    ):
         return MatchResult(MatchClass.DISTINCT, "different_city", 0.0, business)
     if distance is not None and distance > 1_000:
         return MatchResult(MatchClass.DISTINCT, "different_location", 0.0, business)
 
     if name_ratio == 1.0 and same_address:
         return MatchResult(MatchClass.EXACT, "exact_name_address", 1.0, business)
-    if same_domain and (same_address or (distance is not None and distance <= 50)) and name_ratio >= 0.65:
+    if (
+        same_domain
+        and (same_address or (distance is not None and distance <= 50))
+        and name_ratio >= 0.65
+    ):
         return MatchResult(MatchClass.EXACT, "domain_name_same_location", 1.0, business)
 
     components: list[tuple[float, float]] = [(name_ratio, 0.50)]
@@ -92,7 +104,9 @@ def classify_candidate(
         components.append((float(same_city), 0.10))
     if distance is not None:
         components.append((1.0 if distance <= 50 else 0.0, 0.20))
-    score = sum(value * weight for value, weight in components) / sum(weight for _, weight in components)
+    score = sum(value * weight for value, weight in components) / sum(
+        weight for _, weight in components
+    )
     has_corroborating_evidence = bool(
         (domain_key and same_domain)
         or (address_key and same_address)
@@ -117,7 +131,11 @@ def best_match(
     if not businesses:
         return MatchResult(MatchClass.DISTINCT, "no_candidate", 0.0, None)
     results = [classify_candidate(business, candidate, rules) for business in businesses]
-    results.sort(key=lambda result: (-result.score, result.candidate.id if result.candidate else ""))
+    results.sort(
+        key=lambda result: (-result.score, result.candidate.id if result.candidate else "")
+    )
     if len(results) > 1 and results[0].score == results[1].score and results[0].score > 0:
-        return MatchResult(MatchClass.UNCERTAIN, "ambiguous_multiple_candidates", results[0].score, None)
+        return MatchResult(
+            MatchClass.UNCERTAIN, "ambiguous_multiple_candidates", results[0].score, None
+        )
     return results[0]

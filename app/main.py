@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from sqlalchemy import or_
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
@@ -14,7 +14,9 @@ from app.db import models
 from app.db.session import Base, SessionLocal, engine
 from app.schemas import ScheduleRequest, SearchRequest
 from app.services.discovery import source_compatibility
+from app.services.job_state import InvalidJobTransition, transition_job
 from app.services.merges import MergeError, merge_businesses, reverse_business_merge
+from app.services.scheduling import refresh_execution_status
 from app.tasks.celery_app import run_job
 
 
@@ -218,6 +220,8 @@ async def create_job(
         source_ids=[source.id for source in compatible],
         bounds=payload.bounds.model_dump() if payload.bounds else None,
         max_results=payload.max_results,
+        job_type="collection",
+        trigger_type="manual",
     )
     db.add(job)
     db.commit()
@@ -226,7 +230,7 @@ async def create_job(
         run_job.delay(job.id)
     except Exception:
         # Queue failure remains observable as failed rather than returning a phantom accepted job.
-        job.status, job.error = "failed", "Background queue unavailable"
+        transition_job(job, "failed", error="Background queue unavailable")
         db.commit()
         raise HTTPException(status_code=503, detail="Background queue unavailable")
     return {
@@ -251,6 +255,14 @@ def list_jobs(
             "region": j.region,
             "bounds": j.bounds,
             "status": j.status,
+            "job_type": j.job_type,
+            "trigger_type": j.trigger_type,
+            "source_ids": j.source_ids,
+            "started_at": j.started_at,
+            "completed_at": j.completed_at,
+            "retry_count": j.retry_count,
+            "outcome": j.outcome,
+            "error": j.error,
             "created_at": j.created_at,
         }
         for j in db.query(models.Job)
@@ -272,12 +284,64 @@ def get_job(job_id: str, _: str = Depends(admin), db: Session = Depends(session)
         "region": job.region,
         "bounds": job.bounds,
         "status": job.status,
+        "job_type": job.job_type,
+        "trigger_type": job.trigger_type,
+        "source_ids": job.source_ids,
         "created_at": job.created_at,
         "started_at": job.started_at,
         "completed_at": job.completed_at,
+        "retry_count": job.retry_count,
+        "retry_limit": job.retry_limit,
+        "execution_timeout_seconds": job.execution_timeout_seconds,
+        "cancellation_requested_at": job.cancellation_requested_at,
         "outcome": job.outcome,
         "error": job.error,
     }
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, _: str = Depends(admin), db: Session = Depends(session)):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    cancellable_states = {"succeeded", "partial_success", "failed", "cancelled"}
+    if job.status in cancellable_states:
+        return {"id": job.id, "status": job.status}
+    current = models.now()
+    if job.status in {"queued", "retrying"}:
+        result = db.execute(
+            update(models.Job)
+            .where(models.Job.id == job.id, models.Job.status == job.status)
+            .values(status="cancelled", cancellation_requested_at=current, completed_at=current)
+        )
+        if result.rowcount == 1:
+            db.refresh(job)
+            refresh_execution_status(db, job)
+            db.commit()
+            return {"id": job.id, "status": job.status}
+        db.refresh(job)
+    if job.status == "running":
+        result = db.execute(
+            update(models.Job)
+            .where(models.Job.id == job.id, models.Job.status == "running")
+            .values(status="cancel_requested", cancellation_requested_at=current)
+        )
+        if result.rowcount == 1:
+            db.refresh(job)
+            db.commit()
+            return {"id": job.id, "status": job.status}
+        db.refresh(job)
+    if job.status == "cancel_requested":
+        return {"id": job.id, "status": job.status}
+    if job.status in cancellable_states:
+        return {"id": job.id, "status": job.status}
+    try:
+        transition_job(job, "cancelled")
+    except InvalidJobTransition as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    db.commit()
+    return {"id": job.id, "status": job.status}
 
 
 @app.get("/jobs/{job_id}/results")

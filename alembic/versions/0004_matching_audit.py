@@ -56,7 +56,10 @@ def upgrade() -> None:
     for name, column in (
         ("normalized_address", sa.Column("normalized_address", sa.String(1000))),
         ("normalized_phone", sa.Column("normalized_phone", sa.String(64))),
-        ("field_quality_json", sa.Column("field_quality_json", sa.JSON(), nullable=False, server_default="{}")),
+        (
+            "field_quality_json",
+            sa.Column("field_quality_json", sa.JSON(), nullable=False, server_default="{}"),
+        ),
     ):
         if name not in business_columns:
             op.add_column("businesses", column)
@@ -91,8 +94,18 @@ def upgrade() -> None:
         quality = {
             field: 50
             for field in (
-                "name", "website", "address", "city", "region", "postal_code",
-                "latitude", "longitude", "categories", "email", "phone", "description",
+                "name",
+                "website",
+                "address",
+                "city",
+                "region",
+                "postal_code",
+                "latitude",
+                "longitude",
+                "categories",
+                "email",
+                "phone",
+                "description",
             )
             if row[field] not in (None, "", [])
         }
@@ -116,7 +129,13 @@ def upgrade() -> None:
         op.create_table(
             "match_decisions",
             sa.Column("id", sa.String(36), primary_key=True),
-            sa.Column("source_record_id", sa.String(36), sa.ForeignKey("source_records.id"), unique=True, nullable=False),
+            sa.Column(
+                "source_record_id",
+                sa.String(36),
+                sa.ForeignKey("source_records.id"),
+                unique=True,
+                nullable=False,
+            ),
             sa.Column("business_id", sa.String(36), nullable=False),
             sa.Column("candidate_business_id", sa.String(36)),
             sa.Column("classification", sa.String(20), nullable=False),
@@ -152,10 +171,15 @@ def upgrade() -> None:
     if "reversed_by" not in merge_columns:
         op.add_column("business_merge_events", sa.Column("reversed_by", sa.String(200)))
     indexes = {index["name"] for index in sa.inspect(bind).get_indexes("businesses")}
-    for name, column in (("ix_businesses_normalized_address", "normalized_address"), ("ix_businesses_normalized_phone", "normalized_phone")):
+    for name, column in (
+        ("ix_businesses_normalized_address", "normalized_address"),
+        ("ix_businesses_normalized_phone", "normalized_phone"),
+    ):
         if name not in indexes:
             op.create_index(name, "businesses", [column])
-    merge_indexes = {index["name"] for index in sa.inspect(bind).get_indexes("business_merge_events")}
+    merge_indexes = {
+        index["name"] for index in sa.inspect(bind).get_indexes("business_merge_events")
+    }
     for name, column in (
         ("ix_business_merge_events_source_business_id", "source_business_id"),
         ("ix_business_merge_events_target_business_id", "target_business_id"),

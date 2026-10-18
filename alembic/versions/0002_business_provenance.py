@@ -65,7 +65,9 @@ def upgrade() -> None:
     source_indexes = {i["name"] for i in sa.inspect(op.get_bind()).get_indexes("source_records")}
     business_indexes = {i["name"] for i in sa.inspect(op.get_bind()).get_indexes("businesses")}
     if "ix_source_records_source_external" not in source_indexes:
-        op.create_index("ix_source_records_source_external", "source_records", ["source_id", "external_id"])
+        op.create_index(
+            "ix_source_records_source_external", "source_records", ["source_id", "external_id"]
+        )
     if "ix_source_records_seen" not in source_indexes:
         op.create_index("ix_source_records_seen", "source_records", ["first_seen", "last_seen"])
     if "ix_business_country_city" not in business_indexes:
@@ -88,8 +90,16 @@ def downgrade() -> None:
     op.drop_index("ix_business_country_city", table_name="businesses")
     op.drop_index("ix_source_records_seen", table_name="source_records")
     op.drop_index("ix_source_records_source_external", table_name="source_records")
-    op.create_unique_constraint("uq_source_external", "source_records", ["source_id", "external_id"])
-    for name in ("collection_status", "last_seen", "first_seen", "source_name", "source_identifier"):
+    op.create_unique_constraint(
+        "uq_source_external", "source_records", ["source_id", "external_id"]
+    )
+    for name in (
+        "collection_status",
+        "last_seen",
+        "first_seen",
+        "source_name",
+        "source_identifier",
+    ):
         op.drop_column("source_records", name)
     for name in ("updated_at", "created_at", "verified_at", "website"):
         op.drop_column("businesses", name)

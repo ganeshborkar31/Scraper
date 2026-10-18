@@ -42,8 +42,18 @@ def merge_businesses(
     target_quality = dict(target.field_quality_json or {})
     quality_before = dict(target_quality)
     merge_fields = (
-        "name", "website", "address", "city", "region", "postal_code", "latitude",
-        "longitude", "categories", "email", "phone", "description",
+        "name",
+        "website",
+        "address",
+        "city",
+        "region",
+        "postal_code",
+        "latitude",
+        "longitude",
+        "categories",
+        "email",
+        "phone",
+        "description",
     )
     for field in merge_fields:
         source_value = getattr(source, field)
@@ -77,7 +87,9 @@ def merge_businesses(
     db.flush()
     for record in records:
         record.business_id = target_business_id
-        decision = db.scalar(select(MatchDecision).where(MatchDecision.source_record_id == record.id))
+        decision = db.scalar(
+            select(MatchDecision).where(MatchDecision.source_record_id == record.id)
+        )
         if decision:
             decision.business_id = target_business_id
     db.flush()

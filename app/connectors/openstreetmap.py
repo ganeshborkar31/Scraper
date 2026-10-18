@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -124,7 +126,17 @@ class OpenStreetMapConnector(BaseConnector):
             try:
                 retry_seconds = float(retry_after) if retry_after else None
             except ValueError:
-                retry_seconds = None
+                try:
+                    retry_at = parsedate_to_datetime(retry_after) if retry_after else None
+                    if retry_at and retry_at.tzinfo is None:
+                        retry_at = retry_at.replace(tzinfo=UTC)
+                    retry_seconds = (
+                        max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+                        if retry_at
+                        else None
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    retry_seconds = None
             raise ConnectorError(
                 ConnectorErrorKind.RATE_LIMITED,
                 "Overpass rate limit reached",
