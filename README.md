@@ -6,7 +6,7 @@ A policy-aware MVP for collecting business-level records from reviewed sources. 
 
 Working: FastAPI dashboard/API, HTTP Basic protected admin routes, SQLAlchemy persistence, async Celery job queue, persisted schedules dispatched by Celery Beat, normalized business/source provenance records, explainable domain/name deduplication, bounded local CSV/JSON dataset import, search/pagination, CSV export with formula-injection mitigation, and synthetic fixture.
 
-Only the local dataset connector is implemented. No live external connector is enabled. The seeded source contains synthetic demonstration records only. Overpass, company-registry, commercial search, and allowlisted crawling require policy review and implementation; they are not represented as working integrations.
+The extensible connector lifecycle is implemented, including a network-free fixture connector for tests and the local dataset connector. No live external connector is enabled. The seeded source contains synthetic demonstration records only. Overpass, company-registry, commercial search, and allowlisted crawling require policy review and implementation; they are not represented as working integrations. See [docs/adding-a-source.md](docs/adding-a-source.md) to implement another connector.
 
 ## Run locally
 

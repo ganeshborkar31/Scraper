@@ -11,4 +11,4 @@
 
 ## Current execution
 
-The first vertical slice uses HTTP Basic protection and local file imports. Live collection remains disabled. SQLite supports a no-Docker development path; Compose config targets PostgreSQL and Redis. Six unit tests currently cover normalization, dataset parsing, authentication guard, and deterministic deduplication; the full requested API/worker/schedule integration matrix remains outstanding.
+The first vertical slice uses HTTP Basic protection and local file imports. Live collection remains disabled. SQLite supports a no-Docker development path; Compose config targets PostgreSQL and Redis. Connector tests cover dataset and fixture parsing, pagination, malformed records, classified failure isolation, provenance, normalization, and deduplication; the full requested API/worker/schedule integration matrix remains outstanding.

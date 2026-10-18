@@ -1,8 +1,7 @@
 """Initial application schema."""
 from alembic import op
-
-from app.db.session import Base
 from app.db import models  # noqa: F401
+from app.db.session import Base
 
 revision = "0001_initial"
 down_revision = None

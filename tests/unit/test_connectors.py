@@ -9,10 +9,10 @@ def test_normalization_handles_punctuation_and_www():
 
 def test_synthetic_dataset_is_filtered_and_labelled():
     connector = DatasetConnector()
-    items = connector.search(
+    batch = connector.collect(
         SearchRequest(query="example", country="IN", max_results=10),
         {"path": "app/fixtures/synthetic_businesses.json"},
     )
-    assert len(items) == 1
-    assert items[0].name == "Example Bakery"
-    assert items[0].synthetic is True
+    assert len(batch.records) == 1
+    assert batch.records[0].name == "Example Bakery"
+    assert batch.records[0].synthetic is True

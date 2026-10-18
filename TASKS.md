@@ -6,6 +6,12 @@ This file records repository state after inspection and checks. “Verified” m
 
 ## Completed and verified
 
+- [x] Phase 3 connector framework implemented: common connector lifecycle, transport-specific hooks, classified errors, test fixture connector, job integration, provenance, and connector authoring docs.
+- [x] Phase 3 verification: `pytest -q` passes (13 tests) and Ruff passes for `app`, `tests`, and `alembic`.
+
+- [x] Phase 2 database foundation implemented: extended business model, attributable source observation records, incremental migration, and tests for create/update/constraints/duplicate handling/migration execution.
+- [x] Phase 2 verification: `pytest -q` passes (11 tests), Ruff passes for `app`, `tests`, and `alembic`, and Alembic upgrades a clean SQLite database through `0002_business_provenance`.
+
 - [x] FastAPI application imports successfully with the installed environment.
 - [x] Unit suite passes: 6 tests cover helper-level authentication rejection, health helper output, basic normalization, synthetic dataset filtering/labels, repeat source external-ID ingestion, domain matching, and separation of similar names.
 - [x] Ruff reports no findings for `app` and `tests`.
@@ -16,11 +22,11 @@ This file records repository state after inspection and checks. “Verified” m
 
 ## Current components
 
-- **Architecture:** FastAPI request layer, SQLAlchemy persistence, Celery worker and Beat scheduler, Redis queue, PostgreSQL Compose service, SQLite developer fallback. A single dataset connector is registered behind `app.connectors.base.Connector`.
+- **Architecture:** FastAPI request layer, SQLAlchemy persistence, Celery worker and Beat scheduler, Redis queue, PostgreSQL Compose service, SQLite developer fallback. Connectors implement a shared `validate`/`health_check`/`collect` contract, with `BaseConnector` lifecycle hooks for discovery, fetch, parse, normalization, pagination, rate spacing, and validation errors. Dataset is the only production registered connector; the in-memory fixture connector is for offline tests.
 - **Backend and UI:** API and a minimal HTML dashboard are present. There is no separate frontend. Dashboard job content is interpolated into HTML without escaping; see known issues.
-- **Database:** Source, business, provenance, job, and schedule models exist. One Alembic revision is present, but it builds tables from live `Base.metadata`; this is not a stable historical migration. Application lifespan also calls `create_all`.
+- **Database:** Source, business, provenance, job, and schedule models exist. Phase 2 adds business website/verification/audit timestamps, coordinate checks, source identity snapshots, observation timestamps/status, and indexes. Repeat external IDs are represented as separate source observations. Migration `0002_business_provenance` upgrades prior schemas; `0001_initial` still builds from live metadata and should be made a stable historical migration.
 - **API:** Health/readiness, job submission/status, sources listing, business search/detail/export, and basic schedule CRUD routes exist. API tests do not exercise routes through an HTTP client.
-- **Connectors:** Local CSV/JSON parsing is implemented and tested using a synthetic fixture. There are no live provider connectors, allowlisted crawler, file upload, fetch/enrich operation, request limits, or provider credentials configured.
+- **Connectors:** The common lifecycle supports independent discovery/fetch/parse/normalization and pagination strategies; configured request spacing and classified errors are available. Local CSV/JSON parsing and an in-memory test fixture are covered. There are no live provider connectors, allowlisted crawler, file upload, fetch/enrich operation, advanced quota manager, or provider credentials configured.
 - **Background work:** Celery job execution and periodic schedule dispatch code exists. No tests cover worker transitions, partial failures, retry behavior, schedule dispatch, overlap prevention, or idempotency across whole jobs.
 - **Authentication:** HTTP Basic protects most admin routes. Production startup rejects a short/default key and the sample admin password, but accepts the `.env.example` secret placeholder if the admin password is changed. No CSRF defense is present for browser form submission; review Basic Auth browser behavior and add an appropriate defense before wider deployment.
 - **Configuration and containers:** Compose configuration parses and defines a one-shot migration service plus PostgreSQL/Redis/API/worker/scheduler. Container startup was not run because Docker daemon access was denied. PostgreSQL credentials are fixed development values in Compose. The local README flow does not override its Compose-oriented Redis hostname for a host-run worker.

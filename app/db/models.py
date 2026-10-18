@@ -1,7 +1,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -34,10 +44,16 @@ class Source(Base):
 
 class Business(Base):
     __tablename__ = "businesses"
+    __table_args__ = (
+        CheckConstraint("latitude IS NULL OR latitude BETWEEN -90 AND 90", name="ck_business_latitude"),
+        CheckConstraint("longitude IS NULL OR longitude BETWEEN -180 AND 180", name="ck_business_longitude"),
+        Index("ix_business_country_city", "country", "city"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(300), index=True)
     normalized_name: Mapped[str] = mapped_column(String(300), index=True)
     domain: Mapped[str | None] = mapped_column(String(253), index=True)
+    website: Mapped[str | None] = mapped_column(String(1000))
     country: Mapped[str] = mapped_column(String(2), index=True)
     city: Mapped[str | None] = mapped_column(String(200))
     region: Mapped[str | None] = mapped_column(String(200))
@@ -49,21 +65,32 @@ class Business(Base):
     email: Mapped[str | None] = mapped_column(String(320))
     phone: Mapped[str | None] = mapped_column(String(64))
     description: Mapped[str | None] = mapped_column(Text)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     source_records: Mapped[list["SourceRecord"]] = relationship(back_populates="business")
 
 
 class SourceRecord(Base):
     __tablename__ = "source_records"
-    __table_args__ = (UniqueConstraint("source_id", "external_id", name="uq_source_external"),)
+    __table_args__ = (
+        Index("ix_source_records_source_external", "source_id", "external_id"),
+        Index("ix_source_records_seen", "first_seen", "last_seen"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"))
+    source_identifier: Mapped[str] = mapped_column(String(80))
+    source_name: Mapped[str] = mapped_column(String(200))
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
     external_id: Mapped[str | None] = mapped_column(String(300))
     source_url: Mapped[str | None] = mapped_column(String(1000))
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    collection_status: Mapped[str] = mapped_column(String(32), default="collected")
     payload_hash: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     business: Mapped[Business] = relationship(back_populates="source_records")

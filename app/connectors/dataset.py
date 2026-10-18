@@ -2,41 +2,45 @@ import csv
 import json
 from pathlib import Path
 
-from app.schemas import Candidate, SearchRequest
+from app.connectors.base import BaseConnector, ConnectorError, ConnectorErrorKind
+from app.schemas import SearchRequest
 
 
-class DatasetConnector:
+class DatasetConnector(BaseConnector):
     """Imports administrator-controlled local CSV/JSON files; never fetches user URLs."""
 
     def validate(self, config: dict) -> tuple[bool, str | None]:
         path = Path(str(config.get("path", ""))).resolve()
-        return (
-            path.is_file() and path.suffix.lower() in {".csv", ".json"},
-            None if path.is_file() else "dataset file unavailable",
-        )
+        valid = path.is_file() and path.suffix.lower() in {".csv", ".json"}
+        return valid, None if valid else "dataset must be an available CSV or JSON file"
 
-    def search(self, request: SearchRequest, config: dict) -> list[Candidate]:
-        path = Path(config["path"])
-        with path.open(encoding="utf-8", newline="") as handle:
-            rows = (
-                json.load(handle)
-                if path.suffix.lower() == ".json"
-                else list(csv.DictReader(handle))
-            )
+    def discover(self, request: SearchRequest, config: dict) -> list[dict]:
+        path = Path(config["path"]).resolve()
+        try:
+            with path.open(encoding="utf-8", newline="") as handle:
+                rows = (
+                    json.load(handle)
+                    if path.suffix.lower() == ".json"
+                    else list(csv.DictReader(handle))
+                )
+        except json.JSONDecodeError as exc:
+            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "dataset contains invalid JSON") from exc
+        except OSError as exc:
+            raise ConnectorError(ConnectorErrorKind.UNAVAILABLE, "dataset file could not be read") from exc
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise ConnectorError(ConnectorErrorKind.INVALID_RESPONSE, "dataset must contain a list of records")
         output = []
         terms = request.query.lower().split()
         for row in rows:
-            try:
-                candidate = Candidate.model_validate(row)
-            except Exception:
+            row_country = row.get("country")
+            if row_country and str(row_country).upper() != request.country:
                 continue
-            if candidate.country != request.country:
+            if request.city and str(row.get("city", "")).casefold() != request.city.casefold():
                 continue
-            if request.city and (candidate.city or "").casefold() != request.city.casefold():
+            name = row.get("name")
+            if terms and name and not all(term in str(name).lower() for term in terms):
                 continue
-            if terms and not all(term in candidate.name.lower() for term in terms):
-                continue
-            output.append(candidate)
+            output.append(row)
             if len(output) >= request.max_results:
                 break
         return output
