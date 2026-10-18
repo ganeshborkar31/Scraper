@@ -43,6 +43,27 @@ def test_migrations_upgrade_clean_sqlite_database(tmp_path):
         {column["name"] for column in inspector.get_columns("source_records")}
     )
     assert {"match_decisions", "business_merge_events"}.issubset(set(inspector.get_table_names()))
+    assert "schedule_executions" in inspector.get_table_names()
+    assert {
+        "countries",
+        "region",
+        "city",
+        "category",
+        "bounds",
+        "max_results",
+        "source_limits",
+        "allow_overlap",
+        "retry_attempts",
+        "last_error",
+        "archived",
+    }.issubset({column["name"] for column in inspector.get_columns("schedules")})
+    assert {
+        "schedule_id",
+        "schedule_execution_id",
+        "source_limits",
+        "retry_limit",
+        "retry_count",
+    }.issubset({column["name"] for column in inspector.get_columns("jobs")})
 
 
 def test_matching_migration_upgrades_existing_phase4_schema_and_backfills_keys(tmp_path):

@@ -9,8 +9,10 @@
 - [x] Extensible connector lifecycle with fixture connector and classified source/record errors.
 - [x] Phase 4 OpenStreetMap Overpass integration: bounded live-query connector, provenance, saved fixtures, and documented API collection. Live service availability is not exercised by ordinary tests.
 - [x] Phase 5 normalization, conservative match classifications, quality-aware updates, source value retention, and reversible merge audit.
+- [x] Phase 6 on-demand discovery with source compatibility selection, trackable Celery jobs, and paginated new/existing results.
+- [x] Phase 7 scheduled collection with atomic dispatch claims, overlap controls, source limits, pause/resume, execution history, and transient retries.
 - [ ] Broader live connectors, robust distributed rate limiting, and crawler policy enforcement.
-- [ ] Schedule overlap lock, cancellation, per-source outcome UI and complete integration tests.
+- [ ] Schedule editing/cancellation, per-source outcome UI, and complete deployed integration tests.
 
 ## Current execution
 

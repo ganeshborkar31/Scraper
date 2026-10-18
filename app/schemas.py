@@ -97,3 +97,48 @@ class SearchRequest(BaseModel):
         if self.source_ids and len(set(self.source_ids)) != len(self.source_ids):
             raise ValueError("source_ids must not contain duplicates")
         return self
+
+
+class ScheduleRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+    countries: list[str] = Field(min_length=1, max_length=20)
+    region: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=200)
+    source_ids: list[str] | None = Field(default=None, max_length=20)
+    interval_minutes: int = Field(default=1440, ge=5, le=525600)
+    max_results: int = Field(default=100, ge=1, le=1000)
+    source_limits: dict[str, int] = Field(default_factory=dict, max_length=20)
+    bounds: GeographicBounds | None = None
+    enabled: bool = True
+    allow_overlap: bool = False
+    retry_attempts: int = Field(default=3, ge=0, le=5)
+
+    @field_validator("query", "region", "city", "category")
+    @classmethod
+    def schedule_nonblank(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be blank")
+        return value
+
+    @field_validator("countries")
+    @classmethod
+    def normalize_countries(cls, value: list[str]) -> list[str]:
+        normalized = [country.upper() for country in value]
+        if any(not re.fullmatch(r"[A-Z]{2}", country) for country in normalized):
+            raise ValueError("countries must contain ISO alpha-2 codes")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("countries must not contain duplicates")
+        return normalized
+
+    @model_validator(mode="after")
+    def schedule_limits(self):
+        if self.source_ids and len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError("source_ids must not contain duplicates")
+        if any(limit < 1 or limit > self.max_results for limit in self.source_limits.values()):
+            raise ValueError("source limits must be between 1 and max_results")
+        if self.source_ids and set(self.source_limits) - set(self.source_ids):
+            raise ValueError("source_limits keys must be selected source IDs")
+        return self

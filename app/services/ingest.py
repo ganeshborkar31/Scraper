@@ -15,6 +15,7 @@ from app.services.normalization import (
     normalize_name,
     normalize_phone,
 )
+from app.services.scheduling import refresh_execution_status
 
 
 def ingest_job(job_id: str) -> None:
@@ -26,6 +27,7 @@ def ingest_job(job_id: str) -> None:
         db.close()
         return
     job.status, job.started_at = "running", now()
+    refresh_execution_status(db, job)
     db.commit()
     per_source: dict[str, dict] = {}
     discovered = created = updated = duplicates = 0
@@ -47,6 +49,13 @@ def ingest_job(job_id: str) -> None:
         sources = [source for source in sources if source.id in job.source_ids]
     for source in sources:
         connector = CONNECTORS.get(source.connector)
+        remaining_records = max(0, job.max_results - discovered)
+        if remaining_records == 0:
+            per_source[source.code] = {
+                "status": "skipped",
+                "reason": "job record limit reached",
+            }
+            continue
         try:
             if connector is None:
                 raise ValueError("connector is unavailable")
@@ -57,9 +66,20 @@ def ingest_job(job_id: str) -> None:
             valid, reason = connector.validate(source.config)
             if not valid:
                 raise ValueError(reason or "connector is not configured")
-            batch = connector.collect(request, source.config)
+            source_limit = (job.source_limits or {}).get(
+                source.id, (job.source_limits or {}).get(source.code, request.max_results)
+            )
+            source_request = request.model_copy(
+                update={
+                    "max_results": max(
+                        1, min(remaining_records, request.max_results, int(source_limit))
+                    )
+                }
+            )
+            batch = connector.collect(source_request, source.config)
+            records = batch.records[:remaining_records]
             source_created = source_updated = source_duplicates = 0
-            for item in batch.records:
+            for item in records:
                 discovered += 1
                 result = upsert(db, source, item, job_id=job.id)
                 source_created += result == "created"
@@ -74,7 +94,7 @@ def ingest_job(job_id: str) -> None:
             source.last_error = None
             per_source[source.code] = {
                 "status": "succeeded",
-                "discovered": len(batch.records),
+                "discovered": len(records),
                 "created": source_created,
                 "updated": source_updated,
                 "duplicates": source_duplicates,
@@ -88,7 +108,9 @@ def ingest_job(job_id: str) -> None:
                     for issue in batch.issues
                 ],
             }
-            if batch.records:
+            if len(records) < len(batch.records):
+                per_source[source.code]["truncated"] = True
+            if records:
                 successes += 1
             if batch.issues:
                 per_source[source.code]["status"] = "partial_success" if batch.records else "failed"
@@ -96,7 +118,7 @@ def ingest_job(job_id: str) -> None:
                 source.last_error = "; ".join(
                     f"{issue.kind.value}: {issue.message}" for issue in batch.issues[:5]
                 )[:500]
-            if not batch.records and not batch.issues:
+            if not records and not batch.issues:
                 successes += 1
         except Exception as exc:
             db.rollback()
@@ -121,6 +143,7 @@ def ingest_job(job_id: str) -> None:
     )
     job.error = "No approved compatible sources succeeded" if not successes else None
     job.completed_at = now()
+    refresh_execution_status(db, job)
     db.commit()
     db.close()
 

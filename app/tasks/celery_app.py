@@ -2,6 +2,7 @@ from celery import Celery
 
 from app.core.settings import settings
 from app.services.ingest import ingest_job
+from app.services.scheduling import refresh_execution_status, transient_failure_kinds
 
 celery = Celery(
     "business_discovery",
@@ -19,53 +20,50 @@ celery.conf.update(
 )
 
 
-@celery.task(
-    name="run_job", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3}
-)
-def run_job(job_id: str) -> None:
+@celery.task(bind=True, name="run_job", max_retries=5)
+def run_job(self, job_id: str) -> None:
     ingest_job(job_id)
+    from app.db.models import Job
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    job = db.get(Job, job_id)
+    if not job:
+        db.close()
+        return
+    transient = transient_failure_kinds(job)
+    retry_limit = min(5, max(0, job.retry_limit))
+    if (
+        job.status not in {"failed", "partial_success"}
+        or not transient
+        or job.retry_count >= retry_limit
+    ):
+        db.close()
+        return
+    job.retry_count += 1
+    job.status = "retrying"
+    job.error = f"Retry {job.retry_count}/{retry_limit} after transient source failure: {', '.join(transient)}"
+    refresh_execution_status(db, job)
+    db.commit()
+    countdown = min(600, 30 * (2 ** (job.retry_count - 1)))
+    db.close()
+    raise self.retry(
+        exc=RuntimeError("transient source failure"),
+        countdown=countdown,
+        max_retries=retry_limit,
+    )
 
 
 @celery.task(name="dispatch_schedules")
 def dispatch_schedules() -> None:
-    from datetime import timedelta
-
-    from app.db.models import Job, Schedule, now
     from app.db.session import SessionLocal
+    from app.services.scheduling import dispatch_due_schedules
 
     db = SessionLocal()
-    current = now()
-    queued_job_ids: list[str] = []
-    for schedule in (
-        db.query(Schedule).filter(Schedule.enabled.is_(True), Schedule.next_run_at <= current).all()
-    ):
-        active = (
-            db.query(Job)
-            .filter(
-                Job.status.in_(["queued", "running"]),
-                Job.query == schedule.query,
-                Job.country == schedule.country,
-            )
-            .first()
-        )
-        if active:
-            schedule.next_run_at = current + timedelta(minutes=schedule.interval_minutes)
-            continue
-        job = Job(
-            query=schedule.query,
-            country=schedule.country,
-            source_ids=schedule.source_ids,
-            max_results=100,
-        )
-        db.add(job)
-        schedule.last_run_at = current
-        schedule.next_run_at = current + timedelta(minutes=schedule.interval_minutes)
-        db.flush()
-        queued_job_ids.append(job.id)
-    db.commit()
-    db.close()
-    for job_id in queued_job_ids:
-        run_job.delay(job_id)
+    try:
+        dispatch_due_schedules(db, run_job.delay)
+    finally:
+        db.close()
 
 
 celery.conf.beat_schedule = {

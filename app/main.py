@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import settings
 from app.db import models
 from app.db.session import Base, SessionLocal, engine
-from app.schemas import SearchRequest
+from app.schemas import ScheduleRequest, SearchRequest
 from app.services.discovery import source_compatibility
 from app.services.merges import MergeError, merge_businesses, reverse_business_merge
 from app.tasks.celery_app import run_job
@@ -493,28 +493,113 @@ def export_csv(_: str = Depends(admin), db: Session = Depends(session)):
 
 @app.post("/schedules", status_code=201)
 def create_schedule(
-    query: str,
-    country: str,
-    interval_minutes: int = 1440,
-    source_ids: list[str] | None = None,
+    payload: ScheduleRequest,
     _: str = Depends(admin),
     db: Session = Depends(session),
 ):
-    if not query.strip() or not 5 <= interval_minutes <= 525600 or len(country) != 2:
-        raise HTTPException(422, "invalid schedule")
     from datetime import timedelta
 
+    sources = db.query(models.Source).all()
+    by_id = {source.id: source for source in sources}
+    if payload.source_ids:
+        unknown = sorted(set(payload.source_ids) - set(by_id))
+        if unknown:
+            raise HTTPException(
+                422, detail={"message": "Unknown source IDs", "source_ids": unknown}
+            )
+        selected = [by_id[source_id] for source_id in payload.source_ids]
+    else:
+        selected = sources
+    unknown_limit_ids = sorted(set(payload.source_limits) - set(by_id))
+    if unknown_limit_ids:
+        raise HTTPException(
+            422, detail={"message": "Unknown source limit IDs", "source_ids": unknown_limit_ids}
+        )
+    eligible = set()
+    for country in payload.countries:
+        request = SearchRequest(
+            query=payload.query,
+            country=country,
+            region=payload.region,
+            city=payload.city,
+            category=payload.category,
+            source_ids=payload.source_ids,
+            max_results=payload.max_results,
+            bounds=payload.bounds,
+        )
+        compatible = []
+        unsupported = []
+        for source in selected:
+            supported, reason = source_compatibility(source, request)
+            if supported:
+                compatible.append(source)
+            else:
+                unsupported.append({"id": source.id, "code": source.code, "reason": reason})
+        if payload.source_ids and unsupported:
+            raise HTTPException(
+                422,
+                detail={
+                    "message": f"Selected sources cannot support country {country}",
+                    "sources": unsupported,
+                },
+            )
+        if not compatible:
+            raise HTTPException(
+                422,
+                detail={
+                    "message": f"No configured source supports country {country}",
+                    "sources": unsupported,
+                },
+            )
+        eligible.update(source.id for source in compatible)
+    if set(payload.source_limits) - eligible:
+        raise HTTPException(422, "source_limits may only be set for eligible sources")
+    too_frequent = []
+    for source in selected:
+        if source.id not in eligible:
+            continue
+        try:
+            minimum_interval = max(5, int(source.config.get("min_schedule_interval_minutes", 5)))
+        except (TypeError, ValueError):
+            minimum_interval = 5
+        if payload.interval_minutes < minimum_interval:
+            too_frequent.append(source.code)
+    if too_frequent:
+        raise HTTPException(
+            422,
+            detail={
+                "message": "Frequency violates source-specific schedule limits",
+                "sources": too_frequent,
+            },
+        )
     schedule = models.Schedule(
-        query=query,
-        country=country.upper(),
-        source_ids=source_ids or [],
-        interval_minutes=interval_minutes,
-        next_run_at=models.now() + timedelta(minutes=interval_minutes),
+        query=payload.query,
+        country=payload.countries[0],
+        countries=payload.countries,
+        region=payload.region,
+        city=payload.city,
+        category=payload.category,
+        source_ids=payload.source_ids or [],
+        bounds=payload.bounds.model_dump() if payload.bounds else None,
+        max_results=payload.max_results,
+        source_limits=payload.source_limits,
+        interval_minutes=payload.interval_minutes,
+        allow_overlap=payload.allow_overlap,
+        retry_attempts=payload.retry_attempts,
+        enabled=payload.enabled,
+        next_run_at=(
+            models.now() + timedelta(minutes=payload.interval_minutes) if payload.enabled else None
+        ),
     )
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
-    return {"id": schedule.id, "enabled": schedule.enabled, "next_run_at": schedule.next_run_at}
+    return {
+        "id": schedule.id,
+        "enabled": schedule.enabled,
+        "next_run_at": schedule.next_run_at,
+        "countries": schedule.countries,
+    }
 
 
 @app.get("/schedules")
@@ -524,10 +609,22 @@ def schedules(_: str = Depends(admin), db: Session = Depends(session)):
             "id": s.id,
             "query": s.query,
             "country": s.country,
+            "countries": s.countries or [s.country],
+            "region": s.region,
+            "city": s.city,
+            "category": s.category,
+            "bounds": s.bounds,
+            "max_results": s.max_results,
+            "source_ids": s.source_ids,
+            "source_limits": s.source_limits,
+            "allow_overlap": s.allow_overlap,
+            "retry_attempts": s.retry_attempts,
             "enabled": s.enabled,
+            "archived": s.archived,
             "interval_minutes": s.interval_minutes,
             "next_run_at": s.next_run_at,
             "last_run_at": s.last_run_at,
+            "last_error": s.last_error,
         }
         for s in db.query(models.Schedule).all()
     ]
@@ -537,12 +634,57 @@ def schedules(_: str = Depends(admin), db: Session = Depends(session)):
 def update_schedule(
     schedule_id: str, enabled: bool, _: str = Depends(admin), db: Session = Depends(session)
 ):
+    from datetime import timedelta
+
     schedule = db.get(models.Schedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "Schedule not found")
+    if schedule.archived:
+        raise HTTPException(409, "Archived schedule cannot be resumed")
     schedule.enabled = enabled
+    if enabled and schedule.next_run_at is None:
+        schedule.next_run_at = models.now() + timedelta(minutes=schedule.interval_minutes)
+    if not enabled:
+        schedule.next_run_at = None
     db.commit()
     return {"id": schedule.id, "enabled": schedule.enabled}
+
+
+@app.get("/schedules/{schedule_id}/runs")
+def schedule_runs(
+    schedule_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    _: str = Depends(admin),
+    db: Session = Depends(session),
+):
+    if not 1 <= limit <= 200 or offset < 0:
+        raise HTTPException(422, "invalid pagination")
+    if not db.get(models.Schedule, schedule_id):
+        raise HTTPException(404, "Schedule not found")
+    query = db.query(models.ScheduleExecution).filter_by(schedule_id=schedule_id)
+    total = query.count()
+    runs = (
+        query.order_by(models.ScheduleExecution.scheduled_for.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": run.id,
+                "scheduled_for": run.scheduled_for,
+                "started_at": run.started_at,
+                "completed_at": run.completed_at,
+                "status": run.status,
+                "job_ids": run.job_ids,
+                "error": run.error,
+            }
+            for run in runs
+        ],
+    }
 
 
 @app.delete("/schedules/{schedule_id}", status_code=204)
@@ -550,5 +692,8 @@ def delete_schedule(schedule_id: str, _: str = Depends(admin), db: Session = Dep
     schedule = db.get(models.Schedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "Schedule not found")
-    db.delete(schedule)
+    # Preserve execution and collection-job foreign-key history by archiving.
+    schedule.enabled = False
+    schedule.archived = True
+    schedule.next_run_at = None
     db.commit()
